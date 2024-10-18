@@ -164,32 +164,18 @@ async function performLogin(username, password) {
             timeout: 180000 // زيادة المهلة إلى 3 دقائق
         });
 
-        console.log('Current URL:', await page.url());
-        
-        // طباعة محتوى الصفحة
-        const initialContent = await page.content();
-        console.log('Initial page content:', initialContent);
-        
-        // التقاط صورة للصفحة
-        await page.screenshot({ path: 'initial-page.png', fullPage: true });
-
         console.log('Waiting for login form...');
-        await page.waitForSelector('input[name="userid"], .error-message', { visible: true, timeout: 180000 });
-
-        // فحص وجود رسالة خطأ
-        const errorElement = await page.$('.error-message');
-        if (errorElement) {
-            const errorMessage = await page.evaluate(el => el.textContent, errorElement);
-            console.log('Error message found:', errorMessage);
-            throw new Error(`Login page error: ${errorMessage}`);
-        }
+        // انتظار ظهور الحقول
+        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 180000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 180000 });
 
         console.log('Entering login credentials...');
+        // إدخال اسم المستخدم وكلمة المرور
         await page.type('input[name="userid"]', username, { delay: 100 });
         await page.type('input[name="password"]', password, { delay: 100 });
 
         console.log('Submitting login form...');
-        // استخدام معرف الزر الصحيح
+        // الضغط على زر تسجيل الدخول
         await Promise.all([
             page.click('#button-1015'), // الضغط على الزر بواسطة المعرف
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 })
@@ -201,9 +187,7 @@ async function performLogin(username, password) {
         console.log('After login URL:', url);
         console.log('After login page content:', content);
 
-        // التقاط صورة بعد تسجيل الدخول
-        await page.screenshot({ path: 'after-login.png', fullPage: true });
-
+        // التحقق من نجاح تسجيل الدخول
         if (url.includes('dashboard') || content.includes('welcome') || content.includes('الصفحة الرئيسية')) {
             console.log('Login successful');
             return { success: true, page };
@@ -217,6 +201,7 @@ async function performLogin(username, password) {
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
+
 
 
 async function updateCallerId(page, newCallerId) {
