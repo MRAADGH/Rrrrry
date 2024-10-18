@@ -11,8 +11,10 @@
   "dependencies": {
     "express": "^4.17.1",
     "node-telegram-bot-api": "^0.66.0",
-    "puppeteer": "^5.5.0"
-   },
+    "puppeteer": "^5.5.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
   "engines": {
     "node": ">=16"
   }

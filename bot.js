@@ -1,12 +1,13 @@
 const TelegramBot = require('node-telegram-bot-api');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 
-// توكن البوت
+puppeteer.use(StealthPlugin());
+
 const token = '6845291404:AAFwsPGqdbSOjx19EVXjjh4EnUQD1v1vJlc';
 const bot = new TelegramBot(token, { polling: true });
 
-// حالات المحادثة
 const STATES = {
     IDLE: 'IDLE',
     WAITING_USERNAME: 'WAITING_USERNAME',
@@ -14,20 +15,24 @@ const STATES = {
     WAITING_CALLER_ID: 'WAITING_CALLER_ID'
 };
 
-// تخزين حالة المستخدم
 const userStates = new Map();
 const userSessions = new Map();
 
-// تهيئة المتصفح
 let browser;
+
 (async () => {
     browser = await puppeteer.launch({
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-accelerated-2d-canvas',
+            '--disable-gpu'
+        ],
+        defaultViewport: { width: 1920, height: 1080 }
     });
 })();
 
-// معالجة أمر البداية
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     userStates.set(chatId, STATES.IDLE);
@@ -43,7 +48,6 @@ bot.onText(/\/start/, async (msg) => {
     bot.sendMessage(chatId, 'مرحباً بك في بوت تغيير معرف المتصل\nاضغط على زر تسجيل الدخول للبدء', opts);
 });
 
-// معالجة النقر على الأزرار
 bot.on('callback_query', async (callbackQuery) => {
     const chatId = callbackQuery.message.chat.id;
     const data = callbackQuery.data;
@@ -54,7 +58,6 @@ bot.on('callback_query', async (callbackQuery) => {
     }
 });
 
-// معالجة الرسائل النصية
 bot.on('message', async (msg) => {
     if (msg.text && !msg.text.startsWith('/')) {
         const chatId = msg.chat.id;
@@ -84,14 +87,14 @@ bot.on('message', async (msg) => {
                         });
                     } else {
                         userStates.set(chatId, STATES.IDLE);
-                        bot.editMessageText('❌ فشل تسجيل الدخول. يرجى التحقق من اسم المستخدم وكلمة المرور.', {
+                        bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}`, {
                             chat_id: chatId,
                             message_id: statusMessage.message_id
                         });
                     }
                 } catch (error) {
                     console.error('خطأ في تسجيل الدخول:', error);
-                    bot.editMessageText('❌ حدث خطأ أثناء محاولة تسجيل الدخول. الرجاء المحاولة مرة أخرى.', {
+                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تسجيل الدخول. ${error.message}`, {
                         chat_id: chatId,
                         message_id: statusMessage.message_id
                     });
@@ -111,21 +114,20 @@ bot.on('message', async (msg) => {
                             message_id: updateMessage.message_id
                         });
                     } else {
-                        bot.editMessageText('❌ فشل تغيير معرف المتصل. الرجاء المحاولة مرة أخرى.', {
+                        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
                             chat_id: chatId,
                             message_id: updateMessage.message_id
                         });
                     }
                 } catch (error) {
                     console.error('خطأ في تغيير معرف المتصل:', error);
-                    bot.editMessageText('❌ حدث خطأ أثناء محاولة تغيير معرف المتصل.', {
+                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
                         chat_id: chatId,
                         message_id: updateMessage.message_id
                     });
                 }
                 
                 userStates.set(chatId, STATES.IDLE);
-                // إغلاق الصفحة بعد الانتهاء
                 if (currentSession.page) {
                     await currentSession.page.close();
                 }
@@ -135,80 +137,83 @@ bot.on('message', async (msg) => {
     }
 });
 
-// دالة تسجيل الدخول
 async function performLogin(username, password) {
     const page = await browser.newPage();
     try {
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+        
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
             timeout: 60000
         });
 
-        // انتظار ظهور حقول تسجيل الدخول
-        await page.waitForSelector('input[name="username"]');
-        await page.waitForSelector('input[name="password"]');
+        console.log('Current URL:', await page.url());
 
-        // تعبئة البيانات
-        await page.type('input[name="username"]', username);
-        await page.type('input[name="password"]', password);
+        await page.waitForSelector('input[name="username"]', { visible: true, timeout: 60000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 60000 });
 
-        // النقر على زر تسجيل الدخول
+        await page.type('input[name="username"]', username, { delay: 100 });
+        await page.type('input[name="password"]', password, { delay: 100 });
+
         await Promise.all([
             page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle0' })
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
         ]);
 
-        // التحقق من نجاح تسجيل الدخول
         const url = page.url();
         const content = await page.content();
         
-        // يمكنك تعديل هذه الشروط حسب الموقع
+        console.log('After login URL:', url);
+        console.log('Page content:', content);
+
         if (url.includes('dashboard') || content.includes('welcome') || content.includes('الصفحة الرئيسية')) {
             return { success: true, page };
         } else {
-            await page.close();
-            return { success: false };
+            await page.screenshot({ path: 'login-failed.png', fullPage: true });
+            return { success: false, error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' };
         }
     } catch (error) {
         console.error('خطأ في عملية تسجيل الدخول:', error);
-        await page.close();
-        throw error;
+        await page.screenshot({ path: 'login-error.png', fullPage: true });
+        throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
 
-// دالة تحديث معرف المتصل
 async function updateCallerId(page, newCallerId) {
     try {
-        // التنقل إلى صفحة تحديث المعرف
         await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
-            waitUntil: 'networkidle0'
+            waitUntil: 'networkidle0',
+            timeout: 60000
         });
 
-        // انتظار ظهور حقل معرف المتصل
-        await page.waitForSelector('input[name="CallerID"]');
+        console.log('Profile page URL:', await page.url());
 
-        // مسح القيمة القديمة وإدخال القيمة الجديدة
+        await page.waitForSelector('input[name="CallerID"]', { visible: true, timeout: 60000 });
+
         await page.$eval('input[name="CallerID"]', el => el.value = '');
-        await page.type('input[name="CallerID"]', newCallerId);
+        await page.type('input[name="CallerID"]', newCallerId, { delay: 100 });
 
-        // النقر على زر الحفظ
         await Promise.all([
             page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle0' })
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
         ]);
 
-        // التحقق من نجاح التحديث
         const content = await page.content();
-        return {
-            success: content.includes('success') || content.includes('تم التحديث بنجاح')
-        };
+        console.log('After update content:', content);
+
+        if (content.includes('success') || content.includes('تم التحديث بنجاح')) {
+            return { success: true };
+        } else {
+            await page.screenshot({ path: 'update-failed.png', fullPage: true });
+            return { success: false, error: 'فشل تحديث معرف المتصل. يرجى المحاولة مرة أخرى.' };
+        }
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
-        throw error;
+        await page.screenshot({ path: 'update-error.png', fullPage: true });
+        throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
 
-// معالجة إغلاق البوت
 process.on('SIGINT', async () => {
     if (browser) {
         await browser.close();
