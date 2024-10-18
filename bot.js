@@ -263,31 +263,55 @@ async function performLogin(username, password) {
 
 
 // ... [Rest of the code remains the same] ...
+
 async function updateCallerId(page, newCallerId) {
     try {
-        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Users', {
+        console.log('بدء عملية تحديث معرف المتصل...');
+        
+        // الانتقال إلى صفحة الملف الشخصي
+        await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
             waitUntil: 'networkidle0',
             timeout: 120000
         });
+        console.log('تم الانتقال إلى صفحة الملف الشخصي');
 
-        console.log('Profile page URL:', await page.url());
-
+        // انتظار ظهور حقل معرف المتصل
         await page.waitForSelector('input[name="CallerID"]', { visible: true, timeout: 120000 });
+        console.log('تم العثور على حقل معرف المتصل');
 
+        // مسح القيمة الحالية وإدخال القيمة الجديدة
         await page.$eval('input[name="CallerID"]', el => el.value = '');
         await page.type('input[name="CallerID"]', newCallerId, { delay: 100 });
+        console.log('تم إدخال معرف المتصل الجديد');
 
+        // البحث عن زر الحفظ وتحديد المحدد الخاص به
+        const saveButtonSelector = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const saveBtn = buttons.find(btn => {
+                const text = btn.textContent.toLowerCase();
+                return text.includes('save') || text.includes('حفظ') || text.includes('تحديث');
+            });
+            if (saveBtn) {
+                saveBtn.setAttribute('data-testid', 'save-button');
+                return '[data-testid="save-button"]';
+            }
+            return 'button[type="submit"]';
+        });
+
+        // النقر على زر الحفظ وانتظار انتهاء التحميل
         await Promise.all([
-            page.click('button[type="submit"]'),
+            page.click(saveButtonSelector),
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 })
         ]);
+        console.log('تم النقر على زر الحفظ');
 
+        // التحقق من نجاح التحديث
         const content = await page.content();
-        console.log('After update content:', content);
-
         if (content.includes('success') || content.includes('تم التحديث بنجاح')) {
+            console.log('تم تحديث معرف المتصل بنجاح');
             return { success: true };
         } else {
+            console.log('فشل تحديث معرف المتصل');
             await page.screenshot({ path: 'update-failed.png', fullPage: true });
             return { success: false, error: 'فشل تحديث معرف المتصل. يرجى المحاولة مرة أخرى.' };
         }
@@ -297,6 +321,7 @@ async function updateCallerId(page, newCallerId) {
         throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
+
 process.on('SIGINT', async () => {
     if (browser) {
         await browser.close();
