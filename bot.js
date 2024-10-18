@@ -1,4 +1,4 @@
-const TelegramBot = require('node-telegram-bot-api');
+ const TelegramBot = require('node-telegram-bot-api');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
@@ -32,8 +32,6 @@ let browser;
         defaultViewport: { width: 1920, height: 1080 }
     });
 })();
-
-// ... [Previous bot event handlers remain the same] ...
 
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
@@ -153,129 +151,109 @@ async function performLoginWithRetry(username, password, maxRetries = 3) {
     }
 }
 
+
 async function performLogin(username, password) {
     const page = await browser.newPage();
     try {
-        // Set a longer default timeout
-        page.setDefaultTimeout(300000); // 5 minutes
-        
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
         
-        console.log('Navigating to login page...');
+        console.log('جاري الانتقال إلى صفحة تسجيل الدخول...');
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
-            timeout: 300000
+            timeout: 60000
         });
 
-        // Wait for any element from the login form to appear
-        await page.waitForSelector('input[name="userid"], input[name="password"], .x-btn-inner-default-large', {
-            timeout: 300000
+        // انتظار ظهور نموذج تسجيل الدخول
+        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 30000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 30000 });
+        
+        console.log('إدخال بيانات الاعتماد...');
+        
+        // مسح وإدخال اسم المستخدم
+        await page.evaluate(() => {
+            document.querySelector('input[name="userid"]').value = '';
+        });
+        await page.type('input[name="userid"]', username, { delay: 100 });
+
+        // مسح وإدخال كلمة المرور
+        await page.evaluate(() => {
+            document.querySelector('input[name="password"]').value = '';
+        });
+        await page.type('input[name="password"]', password, { delay: 100 });
+
+        // انتظار لحظة قبل النقر
+        await page.waitForTimeout(1000);
+
+        console.log('الضغط على زر تسجيل الدخول...');
+        
+        // العثور على زر تسجيل الدخول بشكل أكثر دقة
+        const loginButton = await page.evaluateHandle(() => {
+            const buttons = Array.from(document.querySelectorAll('.x-btn'));
+            const loginBtn = buttons.find(btn => {
+                const text = btn.textContent.toLowerCase();
+                return text.includes('login') || text.includes('تسجيل الدخول');
+            });
+            return loginBtn;
         });
 
-        // Add a small delay to ensure the page is fully loaded
+        if (!loginButton) {
+            throw new Error('لم يتم العثور على زر تسجيل الدخول');
+        }
+
+        // النقر على الزر وانتظار التحميل
+        await Promise.all([
+            loginButton.click(),
+            page.waitForResponse(
+                response => response.url().includes('mbilling') && response.status() === 200,
+                { timeout: 30000 }
+            )
+        ]);
+
+        // انتظار لحظة للتأكد من اكتمال التحميل
         await page.waitForTimeout(3000);
 
-        console.log('Entering credentials...');
-        
-        // Use evaluate to interact with the form directly
-        await page.evaluate(async (user, pass) => {
-            // Find the username input
-            const useridInput = document.querySelector('input[name="userid"]');
-            if (useridInput) {
-                useridInput.value = user;
-                // Trigger input event
-                useridInput.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-
-            // Find the password input
-            const passwordInput = document.querySelector('input[name="password"]');
-            if (passwordInput) {
-                passwordInput.value = pass;
-                // Trigger input event
-                passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-
-            // Find and click the login button
-            const loginButtons = Array.from(document.querySelectorAll('.x-btn-inner'));
-            const loginButton = loginButtons.find(btn => 
-                btn.textContent.toLowerCase().includes('login') || 
-                btn.textContent.includes('تسجيل الدخول')
-            );
+        // التحقق من نجاح تسجيل الدخول بعدة طرق
+        const isLoggedIn = await page.evaluate(() => {
+            // التحقق من وجود عناصر القائمة
+            const hasMenu = document.querySelector('.x-menu-item-text') !== null;
             
-            if (loginButton) {
-                loginButton.click();
-            }
-        }, username, password);
-
-        // Wait for navigation or error
-        try {
-            await Promise.race([
-                page.waitForNavigation({ timeout: 30000 }),
-                page.waitForSelector('.error-message', { timeout: 30000 })
-            ]);
-        } catch (e) {
-            console.log('Navigation timeout or no error message found');
-        }
-
-        // Take screenshot after login attempt
-        await page.screenshot({ path: 'after-login.png' });
-
-        // Check if login was successful
-        const loginSuccess = await page.evaluate(() => {
-            // Check various success indicators
-            const url = window.location.href;
-            const body = document.body.innerText;
+            // التحقق من وجود اسم المستخدم في الواجهة
+            const hasUserInfo = document.querySelector('.x-panel-header-title') !== null;
             
-            return url.includes('dashboard') ||
-                   url.includes('index.php?r=') ||
-                   body.includes('welcome') ||
-                   body.includes('الصفحة الرئيسية') ||
-                   body.includes('لوحة التحكم');
+            // التحقق من URL الصفحة
+            const correctURL = window.location.href.includes('/mbilling/') && 
+                             !window.location.href.includes('login');
+            
+            // التحقق من عدم وجود رسائل خطأ
+            const noErrors = !document.body.innerText.includes('Invalid') && 
+                           !document.body.innerText.includes('خطأ');
+
+            return hasMenu || hasUserInfo || (correctURL && noErrors);
         });
 
-        if (loginSuccess) {
-            console.log('Login successful');
+        if (isLoggedIn) {
+            console.log('تم تسجيل الدخول بنجاح');
+            // التأكد من اكتمال تحميل الصفحة
+            await page.waitForSelector('.x-panel', { timeout: 10000 });
             return { success: true, page };
         } else {
-            console.log('Login failed');
-            // Check for specific error messages
-            const errorMessage = await page.evaluate(() => {
-                const errorElement = document.querySelector('.error-message');
-                return errorElement ? errorElement.textContent : 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.';
-            });
-            return { success: false, error: errorMessage };
+            console.log('فشل تسجيل الدخول');
+            await page.screenshot({ path: 'login-failed.png' });
+            return { 
+                success: false, 
+                error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' 
+            };
         }
+
     } catch (error) {
-        console.error('Error in login process:', error);
+        console.error('خطأ في عملية تسجيل الدخول:', error);
         await page.screenshot({ path: 'login-error.png' });
-        // Close the page to free up resources
-        await page.close();
-        throw new Error(`حدث خطأ أثناء تسجيل الدخول: ${error.message}`);
+        throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
 
-async function performLoginWithRetry(username, password, maxRetries = 3) {
-    let lastError;
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            console.log(`محاولة تسجيل الدخول ${i + 1} من ${maxRetries}`);
-            const result = await performLogin(username, password);
-            if (result.success) {
-                return result;
-            }
-            lastError = result.error;
-        } catch (error) {
-            console.error(`فشلت محاولة تسجيل الدخول ${i + 1}:`, error);
-            lastError = error.message;
-            if (i === maxRetries - 1) {
-                throw new Error(lastError);
-            }
-            // Wait longer between retries
-            await new Promise(resolve => setTimeout(resolve, 10000)); // 10 seconds
-        }
-    }
-    return { success: false, error: lastError };
-}
+
+// ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
         await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
