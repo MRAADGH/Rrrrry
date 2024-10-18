@@ -264,63 +264,71 @@ async function performLogin(username, password) {
 
 // ... [Rest of the code remains the same] ...
 
+
 async function updateCallerId(page, newCallerId) {
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
         
-        // الانتقال إلى صفحة الملف الشخصي
-        await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
+        // الانتقال إلى الصفحة الرئيسية
+        await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
-            timeout: 120000
+            timeout: 60000
         });
-        console.log('تم الانتقال إلى صفحة الملف الشخصي');
+        console.log('تم الانتقال إلى الصفحة الرئيسية');
+
+        // النقر على "SIP Users"
+        await page.evaluate(() => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const sipUsersLink = links.find(link => link.textContent.includes('SIP Users'));
+            if (sipUsersLink) sipUsersLink.click();
+            else throw new Error('لم يتم العثور على رابط SIP Users');
+        });
+        console.log('تم النقر على SIP Users');
+
+        // انتظار تحميل الصفحة
+        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
+
+        // البحث عن اسم المستخدم وفتح صفحة التفاصيل الخاصة به
+        await page.evaluate(() => {
+            const cells = Array.from(document.querySelectorAll('td.x-grid3-col-username'));
+            const userCell = cells[0]; // افتراض أن المستخدم الأول هو المطلوب
+            if (userCell) userCell.click();
+            else throw new Error('لم يتم العثور على خلية اسم المستخدم');
+        });
+        console.log('تم النقر على اسم المستخدم');
 
         // انتظار ظهور حقل معرف المتصل
-        await page.waitForSelector('input[name="CallerID"]', { visible: true, timeout: 120000 });
+        await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
         console.log('تم العثور على حقل معرف المتصل');
 
         // مسح القيمة الحالية وإدخال القيمة الجديدة
-        await page.$eval('input[name="CallerID"]', el => el.value = '');
-        await page.type('input[name="CallerID"]', newCallerId, { delay: 100 });
+        await page.$eval('input[name="callerid"]', (el, value) => el.value = value, newCallerId);
         console.log('تم إدخال معرف المتصل الجديد');
 
-        // البحث عن زر الحفظ وتحديد المحدد الخاص به
-        const saveButtonSelector = await page.evaluate(() => {
+        // البحث عن زر الحفظ والنقر عليه
+        await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button'));
-            const saveBtn = buttons.find(btn => {
-                const text = btn.textContent.toLowerCase();
-                return text.includes('save') || text.includes('حفظ') || text.includes('تحديث');
-            });
-            if (saveBtn) {
-                saveBtn.setAttribute('data-testid', 'save-button');
-                return '[data-testid="save-button"]';
-            }
-            return 'button[type="submit"]';
+            const saveButton = buttons.find(button => button.textContent.includes('Save'));
+            if (saveButton) saveButton.click();
+            else throw new Error('لم يتم العثور على زر الحفظ');
         });
-
-        // النقر على زر الحفظ وانتظار انتهاء التحميل
-        await Promise.all([
-            page.click(saveButtonSelector),
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 })
-        ]);
         console.log('تم النقر على زر الحفظ');
 
-        // التحقق من نجاح التحديث
-        const content = await page.content();
-        if (content.includes('success') || content.includes('تم التحديث بنجاح')) {
-            console.log('تم تحديث معرف المتصل بنجاح');
-            return { success: true };
-        } else {
-            console.log('فشل تحديث معرف المتصل');
-            await page.screenshot({ path: 'update-failed.png', fullPage: true });
-            return { success: false, error: 'فشل تحديث معرف المتصل. يرجى المحاولة مرة أخرى.' };
-        }
+        // انتظار ظهور رسالة النجاح
+        await page.waitForFunction(
+            () => document.body.innerText.includes('Success'),
+            { timeout: 30000 }
+        );
+        console.log('تم تحديث معرف المتصل بنجاح');
+
+        return { success: true };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
         await page.screenshot({ path: 'update-error.png', fullPage: true });
         throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
+
 
 process.on('SIGINT', async () => {
     if (browser) {
