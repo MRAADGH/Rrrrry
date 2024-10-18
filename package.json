@@ -1,20 +1,16 @@
 {
   "name": "telegram-bot",
   "version": "1.0.0",
-  "description": "Telegram bot using Telegraf",
+  "description": "Telegram bot for updating Caller ID",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
-  "author": "Your Name",
-  "license": "ISC",
   "dependencies": {
-    "express": "^4.17.1",
-    "node-telegram-bot-api": "^0.66.0",
-    "puppeteer": "^5.5.0"
-  },
-  
-  "engines": {
-    "node": ">=16"
+    "node-telegram-bot-api": "^0.30.0",
+    "puppeteer-extra": "^3.1.18",
+    "puppeteer-extra-plugin-stealth": "^2.7.5",
+    "fs": "0.0.1-security",
+    puppeteer": "^5.5.0"
   }
 }
