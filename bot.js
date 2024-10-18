@@ -91,80 +91,41 @@ async function performLogin(username, password) {
         
         console.log('إدخال بيانات الاعتماد...');
         
-        // مسح وإدخال اسم المستخدم
-        await page.evaluate(() => {
-            document.querySelector('input[name="userid"]').value = '';
-        });
         await page.type('input[name="userid"]', username, { delay: 100 });
-
-        // مسح وإدخال كلمة المرور
-        await page.evaluate(() => {
-            document.querySelector('input[name="password"]').value = '';
-        });
         await page.type('input[name="password"]', password, { delay: 100 });
-
-        // انتظار لحظة قبل النقر
-        await page.waitForTimeout(1000);
 
         console.log('الضغط على زر تسجيل الدخول...');
         
-        // العثور على زر تسجيل الدخول بشكل أكثر دقة
-        const loginButton = await page.evaluateHandle(() => {
-            const buttons = Array.from(document.querySelectorAll('.x-btn'));
-            const loginBtn = buttons.find(btn => {
-                const text = btn.textContent.toLowerCase();
-                return text.includes('login') || text.includes('تسجيل الدخول');
-            });
-            return loginBtn;
-        });
-
-        if (!loginButton) {
-            throw new Error('لم يتم العثور على زر تسجيل الدخول');
-        }
-
-        // النقر على الزر وانتظار التحميل
+        // النقر على زر تسجيل الدخول وانتظار انتهاء التحميل
         await Promise.all([
-            loginButton.click(),
-            page.waitForResponse(
-                response => response.url().includes('mbilling') && response.status() === 200,
-                { timeout: 30000 }
-            )
+            page.click('button[type="submit"]'),
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
         ]);
 
-        // انتظار لحظة للتأكد من اكتمال التحميل
-        await page.waitForTimeout(3000);
+        // انتظار لحظة إضافية للتأكد من اكتمال تحميل الصفحة
+        await page.waitForTimeout(5000);
 
-        // التحقق من نجاح تسجيل الدخول بعدة طرق
+        // التقاط صورة بعد محاولة تسجيل الدخول
+        const afterLoginScreenshot = await page.screenshot({ fullPage: true });
+
+        // التحقق من نجاح تسجيل الدخول
         const isLoggedIn = await page.evaluate(() => {
-            // التحقق من وجود عناصر القائمة
-            const hasMenu = document.querySelector('.x-menu-item-text') !== null;
-            
-            // التحقق من وجود اسم المستخدم في الواجهة
-            const hasUserInfo = document.querySelector('.x-panel-header-title') !== null;
-            
-            // التحقق من URL الصفحة
-            const correctURL = window.location.href.includes('/mbilling/') && 
-                             !window.location.href.includes('login');
-            
-            // التحقق من عدم وجود رسائل خطأ
-            const noErrors = !document.body.innerText.includes('Invalid') && 
-                           !document.body.innerText.includes('خطأ');
-
-            return hasMenu || hasUserInfo || (correctURL && noErrors);
+            return !document.body.innerText.includes('Invalid') && 
+                   !document.body.innerText.includes('خطأ') &&
+                   (document.querySelector('.x-menu-item-text') !== null ||
+                    document.querySelector('.x-panel-header-title') !== null);
         });
 
         if (isLoggedIn) {
             console.log('تم تسجيل الدخول بنجاح');
-            // التأكد من اكتمال تحميل الصفحة
-            await page.waitForSelector('.x-panel', { timeout: 10000 });
-            return { success: true, page, loginScreenshot };
+            return { success: true, page, loginScreenshot, afterLoginScreenshot };
         } else {
             console.log('فشل تسجيل الدخول');
-            await page.screenshot({ path: 'login-failed.png' });
             return { 
                 success: false, 
                 error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.',
-                loginScreenshot
+                loginScreenshot,
+                afterLoginScreenshot
             };
         }
 
@@ -186,8 +147,7 @@ bot.on('message', async (msg) => {
                 userSessions.set(chatId, { username: msg.text });
                 userStates.set(chatId, STATES.WAITING_PASSWORD);
                 bot.sendMessage(chatId, 'الرجاء إدخال كلمة المرور:');
-                break;.
-            
+                break;
             case STATES.WAITING_PASSWORD:
                 const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
                 const session = userSessions.get(chatId);
@@ -203,6 +163,9 @@ bot.on('message', async (msg) => {
                         // إرسال صورة صفحة تسجيل الدخول
                         await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
                         
+                        // إرسال صورة بعد محاولة تسجيل الدخول
+                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول' });
+                        
                         bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
                             chat_id: chatId,
                             message_id: statusMessage.message_id
@@ -210,8 +173,11 @@ bot.on('message', async (msg) => {
                     } else {
                         userStates.set(chatId, STATES.IDLE);
                         
-                        // إرسال صورة صفحة تسجيل الدخول في حالة الفشل أيضًا
-                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول (فشل تسجيل الدخول)' });
+                        // إرسال صورة صفحة تسجيل الدخول
+                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
+                        
+                        // إرسال صورة بعد محاولة تسجيل الدخول
+                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد محاولة تسجيل الدخول (فشل)' });
                         
                         bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
                             chat_id: chatId,
@@ -226,8 +192,7 @@ bot.on('message', async (msg) => {
                     });
                     userStates.set(chatId, STATES.IDLE);
                 }
-                break;
-            case STATES.WAITING_CALLER_ID:
+                break
                 const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
                 const currentSession = userSessions.get(chatId);
                 
