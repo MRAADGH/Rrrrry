@@ -169,94 +169,51 @@ async function performLogin(username, password) {
         
         console.log('إدخال بيانات الاعتماد...');
         
-        // مسح وإدخال اسم المستخدم
-        await page.evaluate(() => {
-            document.querySelector('input[name="userid"]').value = '';
-        });
+        // إدخال اسم المستخدم وكلمة المرور
         await page.type('input[name="userid"]', username, { delay: 100 });
-
-        // مسح وإدخال كلمة المرور
-        await page.evaluate(() => {
-            document.querySelector('input[name="password"]').value = '';
-        });
         await page.type('input[name="password"]', password, { delay: 100 });
 
-        // انتظار لحظة قبل النقر
-        await page.waitForTimeout(1000);
-
         console.log('الضغط على زر تسجيل الدخول...');
-        
-        // العثور على زر تسجيل الدخول بشكل أكثر دقة
-        const loginButton = await page.evaluateHandle(() => {
-            const buttons = Array.from(document.querySelectorAll('.x-btn'));
-            const loginBtn = buttons.find(btn => {
-                const text = btn.textContent.toLowerCase();
-                return text.includes('login') || text.includes('تسجيل الدخول');
-            });
-            return loginBtn;
-        });
-
-        if (!loginButton) {
-            throw new Error('لم يتم العثور على زر تسجيل الدخول');
-        }
-
-        // النقر على الزر وانتظار التحميل
         await Promise.all([
-            loginButton.click(),
-            page.waitForResponse(
-                response => response.url().includes('mbilling') && response.status() === 200,
-                { timeout: 30000 }
-            )
+            page.click('button[type="submit"]'),
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 })
         ]);
 
-        // انتظار لحظة للتأكد من اكتمال التحميل
-        await page.waitForTimeout(3000);
-
-        // التحقق من نجاح تسجيل الدخول بعدة طرق
+        // التحقق من نجاح تسجيل الدخول
         const isLoggedIn = await page.evaluate(() => {
-            // التحقق من وجود عناصر القائمة
-            const hasMenu = document.querySelector('.x-menu-item-text') !== null;
-            
-            // التحقق من وجود اسم المستخدم في الواجهة
-            const hasUserInfo = document.querySelector('.x-panel-header-title') !== null;
-            
-            // التحقق من URL الصفحة
-            const correctURL = window.location.href.includes('/mbilling/') && 
-                             !window.location.href.includes('login');
-            
-            // التحقق من عدم وجود رسائل خطأ
-            const noErrors = !document.body.innerText.includes('Invalid') && 
-                           !document.body.innerText.includes('خطأ');
-
-            return hasMenu || hasUserInfo || (correctURL && noErrors);
+            return document.querySelector('.x-menu-item-text') !== null;
         });
 
         if (isLoggedIn) {
             console.log('تم تسجيل الدخول بنجاح');
-            // التأكد من اكتمال تحميل الصفحة
-            await page.waitForSelector('.x-panel', { timeout: 10000 });
+            await page.screenshot({ path: 'login-success.png' });
+
+            // إرسال لقطة الشاشة إلى البوت
+            await bot.sendPhoto(chatId, 'login-success.png', { caption: '✅ تم تسجيل الدخول بنجاح!' });
+
             return { success: true, page };
         } else {
             console.log('فشل تسجيل الدخول');
             await page.screenshot({ path: 'login-failed.png' });
-            return { 
-                success: false, 
-                error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' 
-            };
+            await bot.sendPhoto(chatId, 'login-failed.png', { caption: '❌ فشل تسجيل الدخول.' });
+
+            return { success: false, error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' };
         }
 
     } catch (error) {
         console.error('خطأ في عملية تسجيل الدخول:', error);
         await page.screenshot({ path: 'login-error.png' });
+        await bot.sendPhoto(chatId, 'login-error.png', { caption: `❌ حدث خطأ: ${error.message}` });
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
 
 
+
 // ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
-        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Users', {
+        await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
             waitUntil: 'networkidle0',
             timeout: 120000
         });
