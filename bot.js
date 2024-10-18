@@ -276,26 +276,38 @@ async function updateCallerId(page, newCallerId) {
         });
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
+        // انتظار تحميل القائمة
+        await page.waitForSelector('.x-tree-node-el', { timeout: 30000 });
+        
+        // البحث عن وفتح قائمة "Clients" إذا كانت مغلقة
+        await page.evaluate(() => {
+            const clientsNode = Array.from(document.querySelectorAll('.x-tree-node-el')).find(el => el.textContent.includes('Clients'));
+            if (clientsNode && !clientsNode.classList.contains('x-tree-node-expanded')) {
+                clientsNode.querySelector('.x-tree-ec-icon').click();
+            }
+        });
+        
+        // انتظار ظهور "SIP Users" وفحصه
+        await page.waitForFunction(
+            () => !!document.querySelector('.x-tree-node-anchor span:not(.x-tree-node-icon):contains("SIP Users")'),
+            { timeout: 30000 }
+        );
+        
         // النقر على "SIP Users"
         await page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll('a'));
-            const sipUsersLink = links.find(link => link.textContent.includes('SIP Users'));
+            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor span:not(.x-tree-node-icon)'))
+                .find(el => el.textContent.includes('SIP Users'));
             if (sipUsersLink) sipUsersLink.click();
             else throw new Error('لم يتم العثور على رابط SIP Users');
         });
         console.log('تم النقر على SIP Users');
 
-        // انتظار تحميل الصفحة
-        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
+        // انتظار تحميل جدول المستخدمين
+        await page.waitForSelector('.x-grid3-row', { timeout: 30000 });
 
-        // البحث عن اسم المستخدم وفتح صفحة التفاصيل الخاصة به
-        await page.evaluate(() => {
-            const cells = Array.from(document.querySelectorAll('td.x-grid3-col-username'));
-            const userCell = cells[0]; // افتراض أن المستخدم الأول هو المطلوب
-            if (userCell) userCell.click();
-            else throw new Error('لم يتم العثور على خلية اسم المستخدم');
-        });
-        console.log('تم النقر على اسم المستخدم');
+        // النقر على أول مستخدم في القائمة
+        await page.click('.x-grid3-row');
+        console.log('تم النقر على المستخدم');
 
         // انتظار ظهور حقل معرف المتصل
         await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
@@ -328,6 +340,7 @@ async function updateCallerId(page, newCallerId) {
         throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
+
 
 
 process.on('SIGINT', async () => {
