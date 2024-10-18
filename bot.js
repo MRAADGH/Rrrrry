@@ -85,7 +85,7 @@ async function performLogin(username, password) {
         // التقاط صورة لصفحة تسجيل الدخول
         const loginScreenshot = await page.screenshot({ fullPage: true });
 
-        // انتظار ظهور نموذج تسجيل الدخول
+        // انتظار ظهور حقول الإدخال
         await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 30000 });
         await page.waitForSelector('input[name="password"]', { visible: true, timeout: 30000 });
         
@@ -94,12 +94,31 @@ async function performLogin(username, password) {
         await page.type('input[name="userid"]', username, { delay: 100 });
         await page.type('input[name="password"]', password, { delay: 100 });
 
+        console.log('البحث عن زر تسجيل الدخول...');
+        
+        // البحث عن زر تسجيل الدخول بطرق متعددة
+        const loginButton = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'));
+            const loginBtn = buttons.find(btn => {
+                const text = btn.textContent.toLowerCase();
+                return text.includes('login') || text.includes('تسجيل الدخول') || text.includes('دخول');
+            });
+            return loginBtn ? loginBtn.outerHTML : null;
+        });
+
+        if (!loginButton) {
+            throw new Error('لم يتم العثور على زر تسجيل الدخول');
+        }
+
         console.log('الضغط على زر تسجيل الدخول...');
         
         // النقر على زر تسجيل الدخول وانتظار انتهاء التحميل
         await Promise.all([
-            page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
+            page.evaluate((btnHTML) => {
+                const btn = document.querySelector(btnHTML);
+                if (btn) btn.click();
+            }, loginButton),
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
         ]);
 
         // انتظار لحظة إضافية للتأكد من اكتمال تحميل الصفحة
@@ -131,8 +150,13 @@ async function performLogin(username, password) {
 
     } catch (error) {
         console.error('خطأ في عملية تسجيل الدخول:', error);
-        const errorScreenshot = await page.screenshot();
-        throw new Error(`فشل تسجيل الدخول: ${error.message}`);
+        const errorScreenshot = await page.screenshot({ fullPage: true });
+        return {
+            success: false,
+            error: `فشل تسجيل الدخول: ${error.message}`,
+            loginScreenshot,
+            errorScreenshot
+        };
     }
 }
 
@@ -148,6 +172,7 @@ bot.on('message', async (msg) => {
                 userStates.set(chatId, STATES.WAITING_PASSWORD);
                 bot.sendMessage(chatId, 'الرجاء إدخال كلمة المرور:');
                 break;
+            
             case STATES.WAITING_PASSWORD:
                 const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
                 const session = userSessions.get(chatId);
@@ -155,16 +180,17 @@ bot.on('message', async (msg) => {
                 
                 try {
                     const loginResult = await performLoginWithRetry(session.username, session.password);
+                    
+                    // إرسال صورة صفحة تسجيل الدخول دائمًا
+                    await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
+                    
                     if (loginResult.success) {
                         userStates.set(chatId, STATES.WAITING_CALLER_ID);
                         session.page = loginResult.page;
                         userSessions.set(chatId, session);
                         
-                        // إرسال صورة صفحة تسجيل الدخول
-                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
-                        
-                        // إرسال صورة بعد محاولة تسجيل الدخول
-                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول' });
+                        // إرسال صورة بعد تسجيل الدخول الناجح
+                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول الناجح' });
                         
                         bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
                             chat_id: chatId,
@@ -173,11 +199,12 @@ bot.on('message', async (msg) => {
                     } else {
                         userStates.set(chatId, STATES.IDLE);
                         
-                        // إرسال صورة صفحة تسجيل الدخول
-                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
-                        
-                        // إرسال صورة بعد محاولة تسجيل الدخول
-                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد محاولة تسجيل الدخول (فشل)' });
+                        // إرسال صورة الخطأ في حالة الفشل
+                        if (loginResult.errorScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.errorScreenshot, { caption: 'صورة صفحة الخطأ' });
+                        } else if (loginResult.afterLoginScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد محاولة تسجيل الدخول (فشل)' });
+                        }
                         
                         bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
                             chat_id: chatId,
@@ -192,7 +219,7 @@ bot.on('message', async (msg) => {
                     });
                     userStates.set(chatId, STATES.IDLE);
                 }
-                break
+                break;
                 const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
                 const currentSession = userSessions.get(chatId);
                 
