@@ -96,17 +96,21 @@ async function performLogin(username, password) {
 
         console.log('البحث عن زر تسجيل الدخول...');
         
-        // البحث عن زر تسجيل الدخول بطرق متعددة
-        const loginButton = await page.evaluate(() => {
+        // البحث عن زر تسجيل الدخول باستخدام نص الزر
+        const loginButtonSelector = await page.evaluate(() => {
             const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'));
             const loginBtn = buttons.find(btn => {
                 const text = btn.textContent.toLowerCase();
                 return text.includes('login') || text.includes('تسجيل الدخول') || text.includes('دخول');
             });
-            return loginBtn ? loginBtn.outerHTML : null;
+            if (loginBtn) {
+                loginBtn.setAttribute('data-testid', 'login-button');
+                return '[data-testid="login-button"]';
+            }
+            return null;
         });
 
-        if (!loginButton) {
+        if (!loginButtonSelector) {
             throw new Error('لم يتم العثور على زر تسجيل الدخول');
         }
 
@@ -114,10 +118,7 @@ async function performLogin(username, password) {
         
         // النقر على زر تسجيل الدخول وانتظار انتهاء التحميل
         await Promise.all([
-            page.evaluate((btnHTML) => {
-                const btn = document.querySelector(btnHTML);
-                if (btn) btn.click();
-            }, loginButton),
+            page.click(loginButtonSelector),
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
         ]);
 
@@ -159,8 +160,8 @@ async function performLogin(username, password) {
         };
     }
 }
-
 // تحديث جزء معالجة الرسائل لإرسال الصورة
+
 bot.on('message', async (msg) => {
     if (msg.text && !msg.text.startsWith('/')) {
         const chatId = msg.chat.id;
@@ -172,7 +173,6 @@ bot.on('message', async (msg) => {
                 userStates.set(chatId, STATES.WAITING_PASSWORD);
                 bot.sendMessage(chatId, 'الرجاء إدخال كلمة المرور:');
                 break;
-            
             case STATES.WAITING_PASSWORD:
                 const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
                 const session = userSessions.get(chatId);
@@ -182,7 +182,9 @@ bot.on('message', async (msg) => {
                     const loginResult = await performLoginWithRetry(session.username, session.password);
                     
                     // إرسال صورة صفحة تسجيل الدخول دائمًا
-                    await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
+                    if (loginResult.loginScreenshot) {
+                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
+                    }
                     
                     if (loginResult.success) {
                         userStates.set(chatId, STATES.WAITING_CALLER_ID);
@@ -190,7 +192,9 @@ bot.on('message', async (msg) => {
                         userSessions.set(chatId, session);
                         
                         // إرسال صورة بعد تسجيل الدخول الناجح
-                        await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول الناجح' });
+                        if (loginResult.afterLoginScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول الناجح' });
+                        }
                         
                         bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
                             chat_id: chatId,
