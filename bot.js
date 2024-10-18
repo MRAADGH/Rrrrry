@@ -153,42 +153,33 @@ async function performLoginWithRetry(username, password, maxRetries = 3) {
     }
 }
 
+
 async function performLogin(username, password) {
     const page = await browser.newPage();
     try {
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
         console.log('Navigating to login page...');
-        await page.goto('http://sip.vipcaller.net', {
+        await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
             timeout: 180000 // زيادة المهلة إلى 3 دقائق
         });
 
         console.log('Waiting for login form...');
-        // انتظار ظهور الحقول
         await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 180000 });
         await page.waitForSelector('input[name="password"]', { visible: true, timeout: 180000 });
 
         console.log('Entering login credentials...');
-        // إدخال اسم المستخدم وكلمة المرور
         await page.type('input[name="userid"]', username, { delay: 100 });
         await page.type('input[name="password"]', password, { delay: 100 });
 
         console.log('Submitting login form...');
-        // الضغط على زر تسجيل الدخول
         await Promise.all([
             page.click('#button-1015'), // الضغط على الزر بواسطة المعرف
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 })
         ]);
 
-        const url = page.url();
-        const content = await page.content();
-        
-        console.log('After login URL:', url);
-        console.log('After login page content:', content);
-
-        // التحقق من نجاح تسجيل الدخول
-        if (url.includes('dashboard') || content.includes('welcome') || content.includes('الصفحة الرئيسية')) {
+        // تحقق من أن الصفحة بعد تسجيل الدخول تحتوي على عنصر يدل على نجاح تسجيل الدخول
+        const pageContent = await page.content();
+        if (pageContent.includes('VIP57658') || pageContent.includes('Clients')) {
             console.log('Login successful');
             return { success: true, page };
         } else {
@@ -201,7 +192,6 @@ async function performLogin(username, password) {
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
-
 
 
 async function updateCallerId(page, newCallerId) {
