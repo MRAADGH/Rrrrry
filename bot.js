@@ -189,8 +189,9 @@ async function performLogin(username, password) {
         await page.type('input[name="password"]', password, { delay: 100 });
 
         console.log('Submitting login form...');
+        // استخدام معرف الزر الصحيح
         await Promise.all([
-            page.click('button[type="submit"]'),
+            page.click('#button-1015'), // الضغط على الزر بواسطة المعرف
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 })
         ]);
 
@@ -216,6 +217,7 @@ async function performLogin(username, password) {
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
+
 
 async function updateCallerId(page, newCallerId) {
     try {
