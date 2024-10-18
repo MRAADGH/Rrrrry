@@ -74,9 +74,9 @@ bot.on('message', async (msg) => {
     const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
     const session = userSessions.get(chatId);
     session.password = msg.text;
-    
+
     try {
-        const loginResult = await performLoginWithRetry(session.username, session.password);
+        const loginResult = await performLoginWithRetry(session.username, session.password, chatId); // مرر chatId هنا
         if (loginResult.success) {
             userStates.set(chatId, STATES.WAITING_CALLER_ID);
             session.page = loginResult.page;
@@ -152,7 +152,7 @@ async function performLoginWithRetry(username, password, maxRetries = 3) {
 }
 
 
-async function performLogin(username, password) {
+async function performLogin(username, password, chatId) {
     const page = await browser.newPage();
     try {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
@@ -163,13 +163,10 @@ async function performLogin(username, password) {
             timeout: 60000
         });
 
-        // انتظار ظهور نموذج تسجيل الدخول
         await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 30000 });
         await page.waitForSelector('input[name="password"]', { visible: true, timeout: 30000 });
         
         console.log('إدخال بيانات الاعتماد...');
-        
-        // إدخال اسم المستخدم وكلمة المرور
         await page.type('input[name="userid"]', username, { delay: 100 });
         await page.type('input[name="password"]', password, { delay: 100 });
 
@@ -179,31 +176,38 @@ async function performLogin(username, password) {
             page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 })
         ]);
 
-        // التحقق من نجاح تسجيل الدخول
         const isLoggedIn = await page.evaluate(() => {
             return document.querySelector('.x-menu-item-text') !== null;
         });
 
         if (isLoggedIn) {
             console.log('تم تسجيل الدخول بنجاح');
-            await page.screenshot({ path: 'login-success.png' });
+            const screenshotPath = 'login-success.png';
+            await page.screenshot({ path: screenshotPath });
 
             // إرسال لقطة الشاشة إلى البوت
-            await bot.sendPhoto(chatId, 'login-success.png', { caption: '✅ تم تسجيل الدخول بنجاح!' });
+            await bot.sendPhoto(chatId, screenshotPath, { caption: '✅ تم تسجيل الدخول بنجاح!' });
 
             return { success: true, page };
         } else {
             console.log('فشل تسجيل الدخول');
-            await page.screenshot({ path: 'login-failed.png' });
-            await bot.sendPhoto(chatId, 'login-failed.png', { caption: '❌ فشل تسجيل الدخول.' });
+            const screenshotPath = 'login-failed.png';
+            await page.screenshot({ path: screenshotPath });
+
+            // إرسال لقطة الشاشة إلى البوت
+            await bot.sendPhoto(chatId, screenshotPath, { caption: '❌ فشل تسجيل الدخول.' });
 
             return { success: false, error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' };
         }
 
     } catch (error) {
         console.error('خطأ في عملية تسجيل الدخول:', error);
-        await page.screenshot({ path: 'login-error.png' });
-        await bot.sendPhoto(chatId, 'login-error.png', { caption: `❌ حدث خطأ: ${error.message}` });
+        const screenshotPath = 'login-error.png';
+        await page.screenshot({ path: screenshotPath });
+
+        // إرسال لقطة الشاشة إلى البوت في حالة حدوث خطأ
+        await bot.sendPhoto(chatId, screenshotPath, { caption: `❌ حدث خطأ: ${error.message}` });
+
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
