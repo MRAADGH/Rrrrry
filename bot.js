@@ -1,4 +1,5 @@
 const TelegramBot = require('node-telegram-bot-api');
+const puppeteer = require('puppeteer');
 const fs = require('fs');
 
 // توكن البوت
@@ -124,6 +125,7 @@ bot.on('message', async (msg) => {
                 }
                 
                 userStates.set(chatId, STATES.IDLE);
+                // إغلاق الصفحة بعد الانتهاء
                 if (currentSession.page) {
                     await currentSession.page.close();
                 }
@@ -142,17 +144,21 @@ async function performLogin(username, password) {
             timeout: 60000
         });
 
+        // انتظار ظهور حقول تسجيل الدخول
         await page.waitForSelector('input[name="username"]');
         await page.waitForSelector('input[name="password"]');
 
+        // تعبئة البيانات
         await page.type('input[name="username"]', username);
         await page.type('input[name="password"]', password);
 
+        // النقر على زر تسجيل الدخول
         await Promise.all([
             page.click('button[type="submit"]'),
             page.waitForNavigation({ waitUntil: 'networkidle0' })
         ]);
 
+        // التحقق من نجاح تسجيل الدخول
         const url = page.url();
         const content = await page.content();
         
@@ -176,11 +182,14 @@ async function updateCallerId(page, newCallerId) {
             waitUntil: 'networkidle0'
         });
 
+        // انتظار ظهور حقل معرف المتصل
         await page.waitForSelector('input[name="CallerID"]');
 
+        // مسح القيمة القديمة وإدخال القيمة الجديدة
         await page.$eval('input[name="CallerID"]', el => el.value = '');
         await page.type('input[name="CallerID"]', newCallerId);
 
+        // النقر على زر الحفظ
         await Promise.all([
             page.click('button[type="submit"]'),
             page.waitForNavigation({ waitUntil: 'networkidle0' })
