@@ -256,7 +256,7 @@ async function performLogin(username, password) {
 // ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
-        await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
+        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Users', {
             waitUntil: 'networkidle0',
             timeout: 120000
         });
