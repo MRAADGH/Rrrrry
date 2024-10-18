@@ -142,22 +142,26 @@ async function performLogin(username, password) {
     try {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
         
+        // الذهاب إلى صفحة تسجيل الدخول
         await page.goto('http://sip.vipcaller.net/mbilling/', {
-            waitUntil: 'networkidle0',
-            timeout: 60000
+            waitUntil: 'domcontentloaded', // يمكن التبديل إلى 'domcontentloaded' إذا استغرق 'networkidle0' وقتاً طويلاً
+            timeout: 120000 // تمديد وقت التحميل إلى 120 ثانية
         });
 
         console.log('Current URL:', await page.url());
 
-        await page.waitForSelector('input[name="username"]', { visible: true, timeout: 60000 });
-        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 60000 });
+        // التحقق من وجود العناصر المطلوبة
+        await page.waitForSelector('input[name="username"]', { visible: true, timeout: 120000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 120000 });
 
+        // إدخال البيانات
         await page.type('input[name="username"]', username, { delay: 100 });
         await page.type('input[name="password"]', password, { delay: 100 });
 
+        // محاولة تسجيل الدخول
         await Promise.all([
             page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 })
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 120000 }) // تمديد وقت الانتظار للتنقل
         ]);
 
         const url = page.url();
@@ -166,6 +170,7 @@ async function performLogin(username, password) {
         console.log('After login URL:', url);
         console.log('Page content:', content);
 
+        // التحقق مما إذا كان تسجيل الدخول ناجحًا
         if (url.includes('dashboard') || content.includes('welcome') || content.includes('الصفحة الرئيسية')) {
             return { success: true, page };
         } else {
