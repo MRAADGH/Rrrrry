@@ -5,7 +5,7 @@ const fs = require('fs');
 
 puppeteer.use(StealthPlugin());
 
-const token = '6845291404:AAFwsPGqdbSOjx19EVXjjh4EnUQD1v1vJlc'; // استبدل بـ Token البوت الخاص بك
+const token = '6845291404:AAFwsPGqdbSOjx19EVXjjh4EnUQD1v1vJlc';
 const bot = new TelegramBot(token, { polling: true });
 
 const STATES = {
@@ -20,7 +20,6 @@ const userSessions = new Map();
 
 let browser;
 
-// فتح متصفح
 (async () => {
     browser = await puppeteer.launch({
         headless: true,
@@ -34,7 +33,6 @@ let browser;
     });
 })();
 
-// استقبال الأوامر من البوت
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     userStates.set(chatId, STATES.IDLE);
@@ -73,36 +71,36 @@ bot.on('message', async (msg) => {
                 break;
                 
             case STATES.WAITING_PASSWORD:
-                const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
-                const session = userSessions.get(chatId);
-                session.password = msg.text;
+    const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
+    const session = userSessions.get(chatId);
+    session.password = msg.text;
     
-                try {
-                    const loginResult = await performLoginWithRetry(session.username, session.password);
-                    if (loginResult.success) {
-                        userStates.set(chatId, STATES.WAITING_CALLER_ID);
-                        session.page = loginResult.page;
-                        userSessions.set(chatId, session);
-                        bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
-                            chat_id: chatId,
-                            message_id: statusMessage.message_id
-                        });
-                    } else {
-                        userStates.set(chatId, STATES.IDLE);
-                        bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
-                            chat_id: chatId,
-                            message_id: statusMessage.message_id
-                        });
-                    }
-                } catch (error) {
-                    console.error('خطأ في تسجيل الدخول:', error);
-                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تسجيل الدخول. ${error.message}\nيرجى المحاولة مرة أخرى لاحقًا أو الاتصال بالدعم الفني.`, {
-                        chat_id: chatId,
-                        message_id: statusMessage.message_id
-                    });
-                    userStates.set(chatId, STATES.IDLE);
-                }
-                break;
+    try {
+        const loginResult = await performLoginWithRetry(session.username, session.password);
+        if (loginResult.success) {
+            userStates.set(chatId, STATES.WAITING_CALLER_ID);
+            session.page = loginResult.page;
+            userSessions.set(chatId, session);
+            bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
+                chat_id: chatId,
+                message_id: statusMessage.message_id
+            });
+        } else {
+            userStates.set(chatId, STATES.IDLE);
+            bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
+                chat_id: chatId,
+                message_id: statusMessage.message_id
+            });
+        }
+    } catch (error) {
+        console.error('خطأ في تسجيل الدخول:', error);
+        bot.editMessageText(`❌ حدث خطأ أثناء محاولة تسجيل الدخول. ${error.message}\nيرجى المحاولة مرة أخرى لاحقًا أو الاتصال بالدعم الفني.`, {
+            chat_id: chatId,
+            message_id: statusMessage.message_id
+        });
+        userStates.set(chatId, STATES.IDLE);
+    }
+    break;
                 
             case STATES.WAITING_CALLER_ID:
                 const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
@@ -157,43 +155,92 @@ async function performLoginWithRetry(username, password, maxRetries = 3) {
 async function performLogin(username, password) {
     const page = await browser.newPage();
     try {
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+        
         console.log('Navigating to login page...');
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
-            timeout: 180000 // زيادة المهلة إلى 3 دقائق
+            timeout: 180000
         });
 
-        console.log('Waiting for login form...');
-        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 180000 });
-        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 180000 });
+        // Wait for the login form to be visible and interactive
+        await page.waitForFunction(() => {
+            const useridInput = document.querySelector('input[name="userid"]');
+            const passwordInput = document.querySelector('input[name="password"]');
+            const loginButton = document.querySelector('.x-btn-inner-default-large');
+            return useridInput && passwordInput && loginButton;
+        }, { timeout: 180000 });
 
-        console.log('Entering login credentials...');
+        console.log('Entering credentials...');
+        
+        // Clear and type username
+        await page.evaluate(() => {
+            const useridInput = document.querySelector('input[name="userid"]');
+            useridInput.value = '';
+        });
         await page.type('input[name="userid"]', username, { delay: 100 });
+
+        // Clear and type password
+        await page.evaluate(() => {
+            const passwordInput = document.querySelector('input[name="password"]');
+            passwordInput.value = '';
+        });
         await page.type('input[name="password"]', password, { delay: 100 });
 
-        console.log('Submitting login form...');
+        // Click login button using specific selector from your HTML
+        const loginButtonSelector = '.x-btn-inner-default-large';
+        await page.waitForSelector(loginButtonSelector);
+        
+        // Take screenshot before clicking login
+        await page.screenshot({ path: 'before-login.png' });
+
+        console.log('Clicking login button...');
         await Promise.all([
-            page.click('#button-1015'), // الضغط على الزر بواسطة المعرف
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 })
+            page.click(loginButtonSelector),
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 180000 }).catch(() => {})
         ]);
 
-        // تحقق من أن الصفحة بعد تسجيل الدخول تحتوي على عنصر يدل على نجاح تسجيل الدخول
-        const pageContent = await page.content();
-        if (pageContent.includes('VIP57658') || pageContent.includes('Clients')) {
+        // Wait for either success or error indicators
+        await page.waitForFunction(() => {
+            // Check for successful login indicators
+            const isLoggedIn = window.location.href.includes('dashboard') ||
+                             document.body.innerText.includes('welcome') ||
+                             document.body.innerText.includes('الصفحة الرئيسية');
+            
+            // Check for error messages
+            const hasError = document.body.innerText.includes('خطأ') ||
+                           document.body.innerText.includes('غير صحيح');
+            
+            return isLoggedIn || hasError;
+        }, { timeout: 180000 });
+
+        // Take screenshot after login attempt
+        await page.screenshot({ path: 'after-login.png' });
+
+        const loginSuccess = await page.evaluate(() => {
+            return window.location.href.includes('dashboard') ||
+                   document.body.innerText.includes('welcome') ||
+                   document.body.innerText.includes('الصفحة الرئيسية');
+        });
+
+        if (loginSuccess) {
             console.log('Login successful');
             return { success: true, page };
         } else {
             console.log('Login failed');
-            return { success: false, error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' };
+            return { 
+                success: false, 
+                error: 'فشل تسجيل الدخول. يرجى التحقق من بيانات الاعتماد.' 
+            };
         }
     } catch (error) {
         console.error('Error in login process:', error);
-        await page.screenshot({ path: 'login-error.png', fullPage: true });
+        await page.screenshot({ path: 'login-error.png' });
         throw new Error(`فشل تسجيل الدخول: ${error.message}`);
     }
 }
 
-
+// ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
         await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
