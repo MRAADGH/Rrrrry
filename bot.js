@@ -265,7 +265,7 @@ async function performLogin(username, password) {
 // ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
-        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Us', {
+        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Users', {
             waitUntil: 'networkidle0',
             timeout: 120000
         });
@@ -297,7 +297,6 @@ async function updateCallerId(page, newCallerId) {
         throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
-
 process.on('SIGINT', async () => {
     if (browser) {
         await browser.close();
