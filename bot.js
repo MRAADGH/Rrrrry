@@ -32,6 +32,7 @@ let browser;
         defaultViewport: { width: 1920, height: 1080 }
     });
 })();
+
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     userStates.set(chatId, STATES.IDLE);
@@ -71,6 +72,104 @@ async function performLoginWithRetry(username, password, maxRetries = 3) {
     }
 }
 
+
+bot.on('message', async (msg) => {
+    if (msg.text && !msg.text.startsWith('/')) {
+        const chatId = msg.chat.id;
+        const state = userStates.get(chatId);
+        
+        switch (state) {
+            case STATES.WAITING_USERNAME:
+                userSessions.set(chatId, { username: msg.text });
+                userStates.set(chatId, STATES.WAITING_PASSWORD);
+                bot.sendMessage(chatId, 'الرجاء إدخال كلمة المرور:');
+                break;
+            case STATES.WAITING_PASSWORD:
+                const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
+                const session = userSessions.get(chatId);
+                session.password = msg.text;
+                
+                try {
+                    const loginResult = await performLoginWithRetry(session.username, session.password);
+                    
+                    if (loginResult.loginScreenshot) {
+                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
+                    }
+                    
+                    if (loginResult.success) {
+                        userStates.set(chatId, STATES.WAITING_CALLER_ID);
+                        session.page = loginResult.page;
+                        userSessions.set(chatId, session);
+                        
+                        if (loginResult.afterLoginScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول الناجح' });
+                        }
+                        
+                        bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
+                            chat_id: chatId,
+                            message_id: statusMessage.message_id
+                        });
+                    } else {
+                        userStates.set(chatId, STATES.IDLE);
+                        
+                        if (loginResult.errorScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.errorScreenshot, { caption: 'صورة صفحة الخطأ' });
+                        } else if (loginResult.afterLoginScreenshot) {
+                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد محاولة تسجيل الدخول (فشل)' });
+                        }
+                        
+                        bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
+                            chat_id: chatId,
+                            message_id: statusMessage.message_id
+                        });
+                    }
+                } catch (error) {
+                    console.error('خطأ في تسجيل الدخول:', error);
+                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تسجيل الدخول. ${error.message}\nيرجى المحاولة مرة أخرى لاحقًا أو الاتصال بالدعم الفني.`, {
+                        chat_id: chatId,
+                        message_id: statusMessage.message_id
+                    });
+                    userStates.set(chatId, STATES.IDLE);
+                }
+                break;
+            case STATES.WAITING_CALLER_ID:
+                const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
+                const currentSession = userSessions.get(chatId);
+                
+                try {
+                    const updateResult = await updateCallerId(currentSession.page, msg.text);
+                    if (updateResult.success) {
+                        bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${msg.text}`, {
+                            chat_id: chatId,
+                            message_id: updateMessage.message_id
+                        });
+                    } else {
+                        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
+                            chat_id: chatId,
+                            message_id: updateMessage.message_id
+                        });
+                    }
+                } catch (error) {
+                    console.error('خطأ في تغيير معرف المتصل:', error);
+                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
+                        chat_id: chatId,
+                        message_id: updateMessage.message_id
+                    });
+                }
+                
+                userStates.set(chatId, STATES.IDLE);
+                if (currentSession.page) {
+                    await currentSession.page.close();
+                }
+                userSessions.delete(chatId);
+                break;
+            default:
+                bot.sendMessage(chatId, 'عذرًا، لم أفهم طلبك. يرجى استخدام الأمر /start للبدء من جديد.');
+        }
+    }
+});
+
+// ... [Rest of the code remains the same] ...
 async function performLogin(username, password) {
     const page = await browser.newPage();
     try {
@@ -162,105 +261,11 @@ async function performLogin(username, password) {
 }
 // تحديث جزء معالجة الرسائل لإرسال الصورة
 
-bot.on('message', async (msg) => {
-    if (msg.text && !msg.text.startsWith('/')) {
-        const chatId = msg.chat.id;
-        const state = userStates.get(chatId);
-        
-        switch (state) {
-            case STATES.WAITING_USERNAME:
-                userSessions.set(chatId, { username: msg.text });
-                userStates.set(chatId, STATES.WAITING_PASSWORD);
-                bot.sendMessage(chatId, 'الرجاء إدخال كلمة المرور:');
-                break;
-            case STATES.WAITING_PASSWORD:
-                const statusMessage = await bot.sendMessage(chatId, 'جاري تسجيل الدخول... ⏳');
-                const session = userSessions.get(chatId);
-                session.password = msg.text;
-                
-                try {
-                    const loginResult = await performLoginWithRetry(session.username, session.password);
-                    
-                    // إرسال صورة صفحة تسجيل الدخول دائمًا
-                    if (loginResult.loginScreenshot) {
-                        await bot.sendPhoto(chatId, loginResult.loginScreenshot, { caption: 'صورة صفحة تسجيل الدخول' });
-                    }
-                    
-                    if (loginResult.success) {
-                        userStates.set(chatId, STATES.WAITING_CALLER_ID);
-                        session.page = loginResult.page;
-                        userSessions.set(chatId, session);
-                        
-                        // إرسال صورة بعد تسجيل الدخول الناجح
-                        if (loginResult.afterLoginScreenshot) {
-                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد تسجيل الدخول الناجح' });
-                        }
-                        
-                        bot.editMessageText('✅ تم تسجيل الدخول بنجاح!\nالرجاء إدخال معرف المتصل الجديد:', {
-                            chat_id: chatId,
-                            message_id: statusMessage.message_id
-                        });
-                    } else {
-                        userStates.set(chatId, STATES.IDLE);
-                        
-                        // إرسال صورة الخطأ في حالة الفشل
-                        if (loginResult.errorScreenshot) {
-                            await bot.sendPhoto(chatId, loginResult.errorScreenshot, { caption: 'صورة صفحة الخطأ' });
-                        } else if (loginResult.afterLoginScreenshot) {
-                            await bot.sendPhoto(chatId, loginResult.afterLoginScreenshot, { caption: 'صورة بعد محاولة تسجيل الدخول (فشل)' });
-                        }
-                        
-                        bot.editMessageText(`❌ فشل تسجيل الدخول. ${loginResult.error}\nيرجى التحقق من بيانات الاعتماد والمحاولة مرة أخرى.`, {
-                            chat_id: chatId,
-                            message_id: statusMessage.message_id
-                        });
-                    }
-                } catch (error) {
-                    console.error('خطأ في تسجيل الدخول:', error);
-                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تسجيل الدخول. ${error.message}\nيرجى المحاولة مرة أخرى لاحقًا أو الاتصال بالدعم الفني.`, {
-                        chat_id: chatId,
-                        message_id: statusMessage.message_id
-                    });
-                    userStates.set(chatId, STATES.IDLE);
-                }
-                break;
-                const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
-                const currentSession = userSessions.get(chatId);
-                
-                try {
-                    const updateResult = await updateCallerId(currentSession.page, msg.text);
-                    if (updateResult.success) {
-                        bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${msg.text}`, {
-                            chat_id: chatId,
-                            message_id: updateMessage.message_id
-                        });
-                    } else {
-                        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
-                            chat_id: chatId,
-                            message_id: updateMessage.message_id
-                        });
-                    }
-                } catch (error) {
-                    console.error('خطأ في تغيير معرف المتصل:', error);
-                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
-                        chat_id: chatId,
-                        message_id: updateMessage.message_id
-                    });
-                }
-                
-                userStates.set(chatId, STATES.IDLE);
-                if (currentSession.page) {
-                    await currentSession.page.close();
-                }
-                userSessions.delete(chatId);
-                break;
-        }
-    }
-});
+
 // ... [Rest of the code remains the same] ...
 async function updateCallerId(page, newCallerId) {
     try {
-        await page.goto('http://sip.vipcaller.net/mbilling/user/profile', {
+        await page.goto('http://sip.vipcaller.net/mbilling/SIP/Us', {
             waitUntil: 'networkidle0',
             timeout: 120000
         });
@@ -299,3 +304,4 @@ process.on('SIGINT', async () => {
     }
     process.exit();
 });
+
