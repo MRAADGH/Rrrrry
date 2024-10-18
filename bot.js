@@ -265,6 +265,7 @@ async function performLogin(username, password) {
 // ... [Rest of the code remains the same] ...
 
 
+
 async function updateCallerId(page, newCallerId) {
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
@@ -276,70 +277,109 @@ async function updateCallerId(page, newCallerId) {
         });
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // انتظار تحميل القائمة
-        await page.waitForSelector('.x-tree-node-el', { timeout: 30000 });
-        
-        // البحث عن وفتح قائمة "Clients" إذا كانت مغلقة
-        await page.evaluate(() => {
-            const clientsNode = Array.from(document.querySelectorAll('.x-tree-node-el')).find(el => el.textContent.includes('Clients'));
-            if (clientsNode && !clientsNode.classList.contains('x-tree-node-expanded')) {
-                clientsNode.querySelector('.x-tree-ec-icon').click();
+        // انتظار تحميل أي عنصر في الصفحة
+        await page.waitForSelector('body', { timeout: 60000 });
+        console.log('تم تحميل الصفحة');
+
+        // التحقق من وجود القائمة الجانبية
+        const sidebarExists = await page.evaluate(() => {
+            return !!document.querySelector('.x-tree-root-node');
+        });
+
+        if (sidebarExists) {
+            console.log('تم العثور على القائمة الجانبية');
+            
+            // البحث عن وفتح قائمة "Clients" إذا كانت موجودة
+            const clientsNodeExists = await page.evaluate(() => {
+                const clientsNode = Array.from(document.querySelectorAll('.x-tree-node-el')).find(el => el.textContent.includes('Clients'));
+                if (clientsNode) {
+                    if (!clientsNode.classList.contains('x-tree-node-expanded')) {
+                        clientsNode.querySelector('.x-tree-ec-icon').click();
+                    }
+                    return true;
+                }
+                return false;
+            });
+
+            if (clientsNodeExists) {
+                console.log('تم العثور على قائمة Clients وفتحها');
+                
+                // انتظار ظهور "SIP Users" وفحصه
+                await page.waitForFunction(
+                    () => !!document.querySelector('.x-tree-node-anchor span:not(.x-tree-node-icon)'),
+                    { timeout: 30000 }
+                );
+                
+                // النقر على "SIP Users"
+                const sipUsersClicked = await page.evaluate(() => {
+                    const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor span:not(.x-tree-node-icon)'))
+                        .find(el => el.textContent.includes('SIP Users'));
+                    if (sipUsersLink) {
+                        sipUsersLink.click();
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (sipUsersClicked) {
+                    console.log('تم النقر على SIP Users');
+
+                    // انتظار تحميل جدول المستخدمين
+                    await page.waitForSelector('.x-grid3-row', { timeout: 30000 });
+
+                    // النقر على أول مستخدم في القائمة
+                    await page.click('.x-grid3-row');
+                    console.log('تم النقر على المستخدم');
+
+                    // انتظار ظهور حقل معرف المتصل
+                    await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
+                    console.log('تم العثور على حقل معرف المتصل');
+
+                    // مسح القيمة الحالية وإدخال القيمة الجديدة
+                    await page.$eval('input[name="callerid"]', (el, value) => el.value = value, newCallerId);
+                    console.log('تم إدخال معرف المتصل الجديد');
+
+                    // البحث عن زر الحفظ والنقر عليه
+                    const saveButtonClicked = await page.evaluate(() => {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const saveButton = buttons.find(button => button.textContent.includes('Save'));
+                        if (saveButton) {
+                            saveButton.click();
+                            return true;
+                        }
+                        return false;
+                    });
+
+                    if (saveButtonClicked) {
+                        console.log('تم النقر على زر الحفظ');
+
+                        // انتظار ظهور رسالة النجاح
+                        await page.waitForFunction(
+                            () => document.body.innerText.includes('Success'),
+                            { timeout: 30000 }
+                        );
+                        console.log('تم تحديث معرف المتصل بنجاح');
+
+                        return { success: true };
+                    } else {
+                        throw new Error('لم يتم العثور على زر الحفظ');
+                    }
+                } else {
+                    throw new Error('لم يتم العثور على رابط SIP Users');
+                }
+            } else {
+                throw new Error('لم يتم العثور على قائمة Clients');
             }
-        });
-        
-        // انتظار ظهور "SIP Users" وفحصه
-        await page.waitForFunction(
-            () => !!document.querySelector('.x-tree-node-anchor span:not(.x-tree-node-icon):contains("SIP Users")'),
-            { timeout: 30000 }
-        );
-        
-        // النقر على "SIP Users"
-        await page.evaluate(() => {
-            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor span:not(.x-tree-node-icon)'))
-                .find(el => el.textContent.includes('SIP Users'));
-            if (sipUsersLink) sipUsersLink.click();
-            else throw new Error('لم يتم العثور على رابط SIP Users');
-        });
-        console.log('تم النقر على SIP Users');
-
-        // انتظار تحميل جدول المستخدمين
-        await page.waitForSelector('.x-grid3-row', { timeout: 30000 });
-
-        // النقر على أول مستخدم في القائمة
-        await page.click('.x-grid3-row');
-        console.log('تم النقر على المستخدم');
-
-        // انتظار ظهور حقل معرف المتصل
-        await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
-        console.log('تم العثور على حقل معرف المتصل');
-
-        // مسح القيمة الحالية وإدخال القيمة الجديدة
-        await page.$eval('input[name="callerid"]', (el, value) => el.value = value, newCallerId);
-        console.log('تم إدخال معرف المتصل الجديد');
-
-        // البحث عن زر الحفظ والنقر عليه
-        await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            const saveButton = buttons.find(button => button.textContent.includes('Save'));
-            if (saveButton) saveButton.click();
-            else throw new Error('لم يتم العثور على زر الحفظ');
-        });
-        console.log('تم النقر على زر الحفظ');
-
-        // انتظار ظهور رسالة النجاح
-        await page.waitForFunction(
-            () => document.body.innerText.includes('Success'),
-            { timeout: 30000 }
-        );
-        console.log('تم تحديث معرف المتصل بنجاح');
-
-        return { success: true };
+        } else {
+            throw new Error('لم يتم العثور على القائمة الجانبية');
+        }
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
         await page.screenshot({ path: 'update-error.png', fullPage: true });
         throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
     }
 }
+
 
 
 
