@@ -133,39 +133,35 @@ bot.on('message', async (msg) => {
                 }
                 break;
             case STATES.WAITING_CALLER_ID:
-        const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
-        const currentSession = userSessions.get(chatId);
-        
-        try {
-            const updateResult = await updateCallerId(currentSession.page, msg.text);
-            if (updateResult.success) {
-                bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${msg.text}`, {
-                    chat_id: chatId,
-                    message_id: updateMessage.message_id
-                });
-            } else {
-                bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
-                    chat_id: chatId,
-                    message_id: updateMessage.message_id
-                });
-            }
-        } catch (error) {
-            console.error('خطأ في تغيير معرف المتصل:', error);
-            bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
+    const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
+    const currentSession = userSessions.get(chatId);
+    
+    try {
+        const updateResult = await updateCallerId(currentSession.page, msg.text);
+        if (updateResult.success) {
+            await bot.sendPhoto(chatId, Buffer.from(updateResult.screenshot, 'base64'), { caption: 'صورة بعد محاولة تحديث معرف المتصل' });
+            bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
                 chat_id: chatId,
                 message_id: updateMessage.message_id
             });
-            if (error.screenshot) {
-                await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
-            }
+        } else {
+            throw new Error('فشل تحديث معرف المتصل');
         }
-        
-        userStates.set(chatId, STATES.IDLE);
-        if (currentSession.page) {
-            await currentSession.page.close();
-        }
-        userSessions.delete(chatId);
-        break;
+    } catch (error) {
+        console.error('خطأ في تغيير معرف المتصل:', error);
+        await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}`, {
+            chat_id: chatId,
+            message_id: updateMessage.message_id
+        });
+    }
+    
+    userStates.set(chatId, STATES.IDLE);
+    if (currentSession.page) {
+        await currentSession.page.close();
+    }
+    userSessions.delete(chatId);
+    break;
             default:
                 bot.sendMessage(chatId, 'عذرًا، لم أفهم طلبك. يرجى استخدام الأمر /start للبدء من جديد.');
         }
@@ -181,15 +177,15 @@ async function performLogin(username, password) {
         console.log('جاري الانتقال إلى صفحة تسجيل الدخول...');
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
-            timeout: 40000
+            timeout: 10000
         });
 
         // التقاط صورة لصفحة تسجيل الدخول
         const loginScreenshot = await page.screenshot({ fullPage: true });
 
         // انتظار ظهور حقول الإدخال
-        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 20000 });
-        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 20000 });
+        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 10000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 10000 });
         
         console.log('إدخال بيانات الاعتماد...');
         
@@ -221,7 +217,7 @@ async function performLogin(username, password) {
         // النقر على زر تسجيل الدخول وانتظار انتهاء التحميل
         await Promise.all([
             page.click(loginButtonSelector),
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 40000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
         ]);
 
         // انتظار لحظة إضافية للتأكد من اكتمال تحميل الصفحة
@@ -356,29 +352,31 @@ async function updateCallerId(page, newCallerId) {
 
         console.log('تم النقر على زر الحفظ');
 
-        // انتظار لفترة قصيرة بدلاً من انتظار رسالة النجاح
+        // انتظار لفترة قصيرة
         await page.waitForTimeout(5000);
 
-        // التحقق من عدم وجود رسائل خطأ
-        const errorMessage = await page.evaluate(() => {
-            const errorElements = document.querySelectorAll('.x-message-error, .error-message');
-            return errorElements.length > 0 ? errorElements[0].textContent : null;
+        // التقاط صورة بعد محاولة الحفظ
+        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
+        // التحقق من القيمة الفعلية لمعرف المتصل
+        const actualCallerId = await page.evaluate(() => {
+            const callerIdField = document.querySelector('input[name="callerid"]');
+            return callerIdField ? callerIdField.value : null;
         });
 
-        if (errorMessage) {
-            throw new Error(`ظهرت رسالة خطأ: ${errorMessage}`);
+        if (actualCallerId !== newCallerId) {
+            throw new Error(`لم يتم تحديث معرف المتصل. القيمة الحالية: ${actualCallerId}`);
         }
 
         console.log('تم تحديث معرف المتصل بنجاح');
 
-        return { success: true };
+        return { success: true, screenshot, actualCallerId };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
-        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot };
+        const errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
     }
 }
-
 
 
 process.on('SIGINT', async () => {
