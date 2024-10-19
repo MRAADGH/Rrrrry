@@ -273,10 +273,6 @@ async function updateCallerId(page, newCallerId) {
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
         
-        // تعيين timeout أطول للتنقل
-        await page.setDefaultNavigationTimeout(60000);
-        await page.setDefaultTimeout(60000);
-
         // الانتقال إلى الصفحة الرئيسية
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
@@ -284,94 +280,69 @@ async function updateCallerId(page, newCallerId) {
         });
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // انتظار تحميل العناصر الأساسية
-        await page.waitForFunction(() => {
-            return document.readyState === 'complete' && 
-                   !document.querySelector('.loading-indicator');
-        }, { timeout: 60000 });
-        console.log('تم تحميل الصفحة بالكامل');
+        // انتظار تحميل الصفحة
+        await page.waitForSelector('body', { timeout: 60000 });
+        console.log('تم تحميل الصفحة');
 
-        // انتظار ظهور وكليك على SIP Users
-        await page.waitForSelector('text/SIP Users', { timeout: 60000 });
-        
-        await page.evaluate(() => {
-            const elements = Array.from(document.querySelectorAll('*'));
-            const sipUsersElement = elements.find(el => 
-                el.textContent?.trim() === 'SIP Users' && 
-                (el.offsetWidth > 0 || el.getClientRects().length > 0)
-            );
-            if (sipUsersElement) {
-                sipUsersElement.click();
+        // العثور على "SIP Users" والنقر عليه
+        const sipUsersFound = await page.evaluate(() => {
+            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
+                .find(el => el.textContent.includes('SIP Users'));
+            if (sipUsersLink) {
+                sipUsersLink.click();
                 return true;
             }
             return false;
         });
-        console.log('تم النقر على SIP Users');
 
-        // انتظار تحميل الجدول وظهور البيانات
-        await page.waitForFunction(() => {
-            const table = document.querySelector('table');
-            const rows = table ? table.querySelectorAll('tr') : [];
-            return rows.length > 1; // نتأكد من وجود صفوف في الجدول
-        }, { timeout: 60000 });
-
-        // انتظار إضافي للتأكد من اكتمال تحميل البيانات
-        await page.waitForTimeout(3000);
-
-        // التقاط صورة بعد النقر على SIP Users
-        const screenshotAfterSIPUsers = await page.screenshot({ 
-            fullPage: true,
-            encoding: 'base64'
-        });
-
-        // النقر على صف المستخدم
-        const userClicked = await page.evaluate(() => {
-            try {
-                // البحث عن الجدول وصفوفه
-                const table = document.querySelector('table');
-                if (!table) return { success: false, error: 'لم يتم العثور على الجدول' };
-
-                // البحث عن أول صف يحتوي على بيانات (تجاهل صف العناوين)
-                const rows = Array.from(table.querySelectorAll('tr')).slice(1);
-                if (rows.length === 0) return { success: false, error: 'لم يتم العثور على أي صفوف في الجدول' };
-
-                // محاولة النقر على الصف الأول
-                const firstRow = rows[0];
-                
-                // محاولة النقر على الرابط أو الخلية في الصف
-                const clickableElement = firstRow.querySelector('a') || firstRow.querySelector('td') || firstRow;
-                clickableElement.click();
-                
-                return { success: true };
-            } catch (error) {
-                return { success: false, error: error.message };
-            }
-        });
-
-        if (!userClicked.success) {
-            throw new Error(`فشل النقر على صف المستخدم: ${userClicked.error}`);
+        if (!sipUsersFound) {
+            throw new Error('لم يتم العثور على رابط SIP Users');
         }
-        console.log('تم النقر على صف المستخدم');
 
-        // انتظار ظهور حقل معرف المتصل
-        await page.waitForSelector('input[name="callerid"]', { timeout: 60000 });
+        console.log('تم العثور على SIP Users والنقر عليه');
 
-        // تحديث معرف المتصل
-        await page.evaluate((newId) => {
-            const input = document.querySelector('input[name="callerid"]');
-            if (input) {
-                input.value = newId;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
+        // انتظار تحميل الجدول
+        await page.waitForSelector('table', { timeout: 30000 });
+
+        // النقر على اسم المستخدم
+        const userClicked = await page.evaluate(() => {
+            const userRow = Array.from(document.querySelectorAll('tr'))
+                .find(row => row.textContent.includes('VIP57658'));
+            if (userRow) {
+                const userNameCell = userRow.querySelector('td');
+                if (userNameCell) {
+                    userNameCell.click();
+                    return true;
+                }
             }
+            return false;
+        });
+
+        if (!userClicked) {
+            throw new Error('لم يتم العثور على اسم المستخدم أو النقر عليه');
+        }
+
+        console.log('تم النقر على اسم المستخدم');
+
+        // انتظار ظهور نموذج تحرير المستخدم
+        await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
+
+        // تحديث قيمة معرف المتصل
+        await page.evaluate((newCallerId) => {
+            const callerIdField = document.querySelector('input[name="callerid"]');
+            if (callerIdField) callerIdField.value = newCallerId;
         }, newCallerId);
 
+        console.log('تم إدخال معرف المتصل الجديد');
+
         // البحث عن زر الحفظ والنقر عليه
-        const saveClicked = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
-            const saveButton = buttons.find(btn => 
-                btn.textContent.toLowerCase().includes('save') || 
-                btn.textContent.includes('حفظ')
-            );
+        const saveButtonClicked = await page.evaluate(() => {
+            const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
+                .find(btn => 
+                    btn.textContent.toLowerCase().includes('save') || 
+                    btn.textContent.includes('حفظ') ||
+                    btn.value?.toLowerCase().includes('save')
+                );
             if (saveButton) {
                 saveButton.click();
                 return true;
@@ -379,33 +350,26 @@ async function updateCallerId(page, newCallerId) {
             return false;
         });
 
-        if (!saveClicked) {
+        if (!saveButtonClicked) {
             throw new Error('لم يتم العثور على زر الحفظ');
         }
 
-        // انتظار اكتمال العملية
-        await page.waitForFunction(() => {
-            return document.body.innerText.includes('Success') ||
-                   document.body.innerText.includes('نجاح') ||
-                   !document.querySelector('.loading-indicator');
-        }, { timeout: 60000 });
+        console.log('تم النقر على زر الحفظ');
 
+        // انتظار ظهور رسالة النجاح
+        await page.waitForFunction(
+            () => document.body.innerText.includes('Success') || document.body.innerText.includes('نجاح'),
+            { timeout: 30000 }
+        );
         console.log('تم تحديث معرف المتصل بنجاح');
-        return { 
-            success: true,
-            screenshotAfterSIPUsers // إرجاع الصورة التي تم التقاطها بعد النقر على SIP Users
-        };
 
+        return { success: true };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
         const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { 
-            message: `فشل تحديث معرف المتصل: ${error.message}`, 
-            screenshot: screenshot || error.screenshotAfterSIPUsers
-        };
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot };
     }
 }
-
 
 
 
