@@ -277,23 +277,29 @@ async function updateCallerId(page, newCallerId) {
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
         // انتظار تحميل الصفحة
-        await page.waitForSelector('table', { timeout: 30000 });
-        console.log('تم تحميل الجدول');
+        await page.waitForSelector('body', { timeout: 60000 });
+        console.log('تم تحميل الصفحة');
 
-        // النقر على الصف الأول في الجدول (باستثناء صف العناوين)
+        // العثور على "SIP Users" والنقر عليه
+        const sipUsersSelector = 'a:contains("SIP Users"), .x-tree-node-anchor:contains("SIP Users")';
+        await page.waitForSelector(sipUsersSelector, { timeout: 30000 });
+        await page.click(sipUsersSelector);
+        console.log('تم النقر على SIP Users');
+
+        // انتظار تحميل الجدول
+        await page.waitForSelector('table', { timeout: 30000 });
+
+        // النقر على أول صف في الجدول (باستثناء صف العناوين)
         await page.evaluate(() => {
             const rows = document.querySelectorAll('table tr');
             if (rows.length > 1) {
                 rows[1].click();
-            } else {
-                throw new Error('لم يتم العثور على صف المستخدم');
             }
         });
         console.log('تم النقر على صف المستخدم');
 
         // انتظار ظهور نموذج تحرير المستخدم
         await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
-        console.log('تم العثور على حقل معرف المتصل');
 
         // تحديث قيمة معرف المتصل
         await page.evaluate((newCallerId) => {
@@ -303,26 +309,13 @@ async function updateCallerId(page, newCallerId) {
         console.log('تم إدخال معرف المتصل الجديد');
 
         // البحث عن زر الحفظ والنقر عليه
-        await page.evaluate(() => {
-            const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
-                .find(btn => 
-                    btn.textContent.toLowerCase().includes('save') || 
-                    btn.textContent.includes('حفظ') ||
-                    btn.value?.toLowerCase().includes('save')
-                );
-            if (saveButton) {
-                saveButton.click();
-            } else {
-                throw new Error('لم يتم العثور على زر الحفظ');
-            }
-        });
+        const saveButtonSelector = 'button:contains("Save"), input[type="submit"][value*="Save"], .x-btn:contains("Save")';
+        await page.waitForSelector(saveButtonSelector, { timeout: 30000 });
+        await page.click(saveButtonSelector);
         console.log('تم النقر على زر الحفظ');
 
-        // انتظار لفترة قصيرة
+        // انتظار لفترة قصيرة للسماح بحفظ التغييرات
         await page.waitForTimeout(5000);
-
-        // التقاط صورة بعد محاولة الحفظ
-        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
         // التحقق من القيمة الفعلية لمعرف المتصل
         const actualCallerId = await page.evaluate(() => {
@@ -336,6 +329,9 @@ async function updateCallerId(page, newCallerId) {
 
         console.log('تم تحديث معرف المتصل بنجاح');
 
+        // التقاط صورة بعد التحديث
+        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
         return { success: true, screenshot, actualCallerId };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
@@ -343,6 +339,8 @@ async function updateCallerId(page, newCallerId) {
         throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
     }
 }
+
+
 
 process.on('SIGINT', async () => {
     if (browser) {
