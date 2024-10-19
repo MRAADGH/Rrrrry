@@ -139,8 +139,13 @@ bot.on('message', async (msg) => {
     try {
         const updateResult = await updateCallerId(currentSession.page, msg.text);
         if (updateResult.success) {
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.screenshot, 'base64'), { caption: 'صورة بعد محاولة تحديث معرف المتصل' });
-            bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
+            // إرسال صورة صفحة تغيير معرف المتصل
+            await bot.sendPhoto(chatId, Buffer.from(updateResult.callerIdPageScreenshot, 'base64'), { caption: 'صورة صفحة تغيير معرف المتصل' });
+            
+            // إرسال صورة بعد محاولة الحفظ
+            await bot.sendPhoto(chatId, Buffer.from(updateResult.afterSaveScreenshot, 'base64'), { caption: 'صورة بعد محاولة حفظ معرف المتصل الجديد' });
+            
+            bot.editMessageText(updateResult.message, {
                 chat_id: chatId,
                 message_id: updateMessage.message_id
             });
@@ -149,7 +154,9 @@ bot.on('message', async (msg) => {
         }
     } catch (error) {
         console.error('خطأ في تغيير معرف المتصل:', error);
-        await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+        if (error.screenshot) {
+            await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+        }
         bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}`, {
             chat_id: chatId,
             message_id: updateMessage.message_id
@@ -264,23 +271,22 @@ async function performLogin(username, password) {
 // ... [Rest of the code remains the same] ...
 
 
-
 async function updateCallerId(page, newCallerId) {
     try {
-        console.log('Starting caller ID update process...');
+        console.log('بدء عملية تحديث معرف المتصل...');
         
-        // Navigate to the home page
+        // الانتقال إلى الصفحة الرئيسية
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
             timeout: 60000
         });
-        console.log('Navigated to home page');
+        console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // Wait for page load
+        // انتظار تحميل الصفحة
         await page.waitForSelector('body', { timeout: 60000 });
-        console.log('Page loaded');
+        console.log('تم تحميل الصفحة');
 
-        // Find and click "SIP Users"
+        // العثور على "SIP Users" والنقر عليه
         const sipUsersFound = await page.evaluate(() => {
             const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
                 .find(el => el.textContent.includes('SIP Users'));
@@ -292,15 +298,15 @@ async function updateCallerId(page, newCallerId) {
         });
 
         if (!sipUsersFound) {
-            throw new Error('SIP Users link not found');
+            throw new Error('لم يتم العثور على رابط SIP Users');
         }
 
-        console.log('Found and clicked SIP Users');
+        console.log('تم العثور على SIP Users والنقر عليه');
 
-        // Wait for table to load
+        // انتظار تحميل الجدول
         await page.waitForSelector('table', { timeout: 30000 });
 
-        // Click on the first row in the table (excluding header row)
+        // النقر على أول صف في الجدول (باستثناء صف العناوين)
         const userClicked = await page.evaluate(() => {
             const rows = document.querySelectorAll('table tr');
             if (rows.length > 1) {
@@ -315,23 +321,28 @@ async function updateCallerId(page, newCallerId) {
         });
 
         if (!userClicked) {
-            throw new Error('User row not found or not clicked');
+            throw new Error('لم يتم العثور على صف المستخدم أو النقر عليه');
         }
 
-        console.log('Clicked on user row');
+        console.log('تم النقر على صف المستخدم');
 
-        // Wait for edit form to appear
+        // انتظار ظهور نموذج تحرير المستخدم
         await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
 
-        // Update caller ID value
+        // التقاط صورة لصفحة تغيير معرف المتصل
+        const callerIdPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
+        console.log('تم التقاط صورة لصفحة تغيير معرف المتصل');
+
+        // تحديث قيمة معرف المتصل
         await page.evaluate((newCallerId) => {
             const callerIdField = document.querySelector('input[name="callerid"]');
             if (callerIdField) callerIdField.value = newCallerId;
         }, newCallerId);
 
-        console.log('Entered new caller ID');
+        console.log('تم إدخال معرف المتصل الجديد');
 
-        // Find and click the save button
+        // البحث عن زر الحفظ والنقر عليه
         const saveButtonClicked = await page.evaluate(() => {
             const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
                 .find(btn => 
@@ -347,104 +358,32 @@ async function updateCallerId(page, newCallerId) {
         });
 
         if (!saveButtonClicked) {
-            throw new Error('Save button not found');
+            throw new Error('لم يتم العثور على زر الحفظ');
         }
 
-        console.log('Clicked save button');
+        console.log('تم النقر على زر الحفظ');
 
-        // Wait for a short period
+        // انتظار لفترة قصيرة
         await page.waitForTimeout(5000);
 
-        // Capture screenshot after save attempt
-        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        // التقاط صورة بعد محاولة الحفظ
+        const afterSaveScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
-        // Verify actual caller ID value
-        const actualCallerId = await page.evaluate(() => {
-            const callerIdField = document.querySelector('input[name="callerid"]');
-            return callerIdField ? callerIdField.value : null;
-        });
+        console.log('تم التقاط صورة بعد محاولة الحفظ');
 
-        if (actualCallerId !== newCallerId) {
-            throw new Error(`Caller ID not updated. Current value: ${actualCallerId}`);
-        }
-
-        console.log('Caller ID updated successfully');
-
-        return { success: true, screenshot, actualCallerId };
+        return { 
+            success: true, 
+            callerIdPageScreenshot, 
+            afterSaveScreenshot, 
+            message: 'تم محاولة تحديث معرف المتصل. يرجى التحقق من الصور المرفقة.' 
+        };
     } catch (error) {
-        console.error('Error updating caller ID:', error);
+        console.error('خطأ في تحديث معرف المتصل:', error);
         const errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { message: `Failed to update caller ID: ${error.message}`, screenshot: errorScreenshot };
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
     }
 }
 
-
-// After clicking save button
-
-const maxRetries = 3;
-let retries = 0;
-let saveSuccess = false;
-
-while (retries < maxRetries && !saveSuccess) {
-    try {
-        // Find and click the save button
-        const saveButtonClicked = await page.evaluate(() => {
-            const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
-                .find(btn => 
-                    btn.textContent.toLowerCase().includes('save') || 
-                    btn.textContent.includes('حفظ') ||
-                    btn.value?.toLowerCase().includes('save')
-                );
-            if (saveButton) {
-                saveButton.click();
-                return true;
-            }
-            return false;
-        });
-
-        if (!saveButtonClicked) {
-            throw new Error('Save button not found');
-        }
-
-        console.log(`Clicked save button (Attempt ${retries + 1})`);
-
-        // Wait for success message or loading indicator to disappear
-        await page.waitForFunction(() => {
-            const loadingIndicator = document.querySelector('.loading-indicator');
-            const successMessage = document.querySelector('.success-message');
-            return (!loadingIndicator || getComputedStyle(loadingIndicator).display === 'none') &&
-                   (successMessage && getComputedStyle(successMessage).display !== 'none');
-        }, { timeout: 10000 }).catch(e => console.log('No success message or loading indicator found'));
-
-        // Wait for a short period
-        await page.waitForTimeout(5000);
-
-        // Verify actual caller ID value
-        const actualCallerId = await page.evaluate(() => {
-            const callerIdField = document.querySelector('input[name="callerid"]');
-            return callerIdField ? callerIdField.value : null;
-        });
-
-        if (actualCallerId === newCallerId) {
-            saveSuccess = true;
-            console.log('Caller ID updated successfully');
-        } else {
-            throw new Error(`Caller ID not updated. Current value: ${actualCallerId}`);
-        }
-    } catch (error) {
-        console.error(`Error saving caller ID (Attempt ${retries + 1}):`, error);
-        retries++;
-        if (retries < maxRetries) {
-            console.log(`Retrying save operation (Attempt ${retries + 1})`);
-            await page.waitForTimeout(3000); // Wait before retrying
-        }
-    }
-}
-
-if (!saveSuccess) {
-    throw new Error(`Failed to update caller ID after ${maxRetries} attempts`);
-}
-// Wait for a short period
 
 process.on('SIGINT', async () => {
     if (browser) {
