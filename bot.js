@@ -288,155 +288,119 @@ async function updateCallerId(page, newCallerId) {
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
         
-        // التأكد من أننا في الصفحة الرئيسية
+        // الانتقال إلى الصفحة الرئيسية
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
-            timeout: 30000
+            timeout: 60000
         });
-        
-        // انتظار لتحميل الصفحة
-        await page.waitForTimeout(3000);
+        console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // محاولة النقر على SIP Users
-        const sipUsersClicked = await page.evaluate(() => {
-            const elements = Array.from(document.querySelectorAll('*'));
-            const sipElement = elements.find(el => 
-                el.textContent?.includes('SIP Users') && 
-                (el.tagName === 'A' || el.tagName === 'SPAN' || el.tagName === 'DIV')
-            );
-            if (sipElement) {
-                sipElement.click();
+        // انتظار تحميل الصفحة
+        await page.waitForSelector('body', { timeout: 60000 });
+        console.log('تم تحميل الصفحة');
+
+        // العثور على "SIP Users" والنقر عليه
+        const sipUsersFound = await page.evaluate(() => {
+            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
+                .find(el => el.textContent.includes('SIP Users'));
+            if (sipUsersLink) {
+                sipUsersLink.click();
                 return true;
             }
             return false;
         });
 
-        if (!sipUsersClicked) {
+        if (!sipUsersFound) {
             throw new Error('لم يتم العثور على رابط SIP Users');
         }
 
-        await page.waitForTimeout(3000);
+        console.log('تم العثور على SIP Users والنقر عليه');
+        
+        // انتظار التنقل بعد النقر على SIP Users
+        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
 
-        // التقاط صورة للصفحة الأولى
-        const firstPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        // التقاط صورة الصفحة التي تم الانتقال إليها
+        const sipUsersScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        await bot.sendPhoto(chatId, Buffer.from(sipUsersScreenshot, 'base64'), { caption: 'صورة صفحة SIP Users بعد النقر' });
 
-        // البحث عن الصف في الجدول والنقر عليه
-        const rowClicked = await page.evaluate(() => {
-            const rows = Array.from(document.querySelectorAll('tr')).filter(row => 
-                row.textContent?.includes('VIP') || 
-                row.textContent?.includes('dynamic') ||
-                row.textContent?.includes('57658')
-            );
-            if (rows.length > 0) {
-                rows[0].click();
-                return true;
+        // انتظار تحميل الجدول
+        await page.waitForSelector('table', { timeout: 30000 });
+
+        // النقر على أول صف في الجدول (باستثناء صف العناوين)
+        const userClicked = await page.evaluate(() => {
+            const rows = document.querySelectorAll('table tr');
+            if (rows.length > 1) {
+                const firstDataRow = rows[1];
+                const firstCell = firstDataRow.querySelector('td');
+                if (firstCell) {
+                    firstCell.click();
+                    return true;
+                }
             }
             return false;
         });
 
-        if (!rowClicked) {
-            throw new Error('لم يتم العثور على صف المستخدم في الجدول');
+        if (!userClicked) {
+            throw new Error('لم يتم العثور على صف المستخدم أو النقر عليه');
         }
 
-        await page.waitForTimeout(3000);
+        console.log('تم النقر على صف المستخدم');
 
-        // التقاط صورة لصفحة التحرير قبل التحديث
-        const editPageBeforeScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        // انتظار ظهور نموذج تحرير المستخدم
+        await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
 
-        // محاولة العثور على حقل معرف المتصل وتحديثه
-        const callerIdUpdated = await page.evaluate((newId) => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            const callerIdInput = inputs.find(input => 
-                input.name === 'callerid' || 
-                input.id?.includes('caller') ||
-                input.placeholder?.includes('Caller')
-            );
-            if (callerIdInput) {
-                callerIdInput.value = newId;
-                callerIdInput.dispatchEvent(new Event('change', { bubbles: true }));
-                return true;
-            }
-            return false;
+        // تحديث قيمة معرف المتصل
+        await page.evaluate((newCallerId) => {
+            const callerIdField = document.querySelector('input[name="callerid"]');
+            if (callerIdField) callerIdField.value = newCallerId;
         }, newCallerId);
 
-        if (!callerIdUpdated) {
-            throw new Error('لم يتم العثور على حقل معرف المتصل');
-        }
+        console.log('تم إدخال معرف المتصل الجديد');
 
-        // انتظار لحظة قبل محاولة الحفظ
-        await page.waitForTimeout(2000);
-
-        // محاولة العثور على زر الحفظ والنقر عليه باستخدام عدة طرق
-        const saveClicked = await page.evaluate(() => {
-            // البحث عن زر الحفظ بعدة طرق
-            const possibleSaveButtons = [
-                // البحث باستخدام النص
-                ...Array.from(document.querySelectorAll('button, input[type="submit"], div, span')).filter(el => 
-                    el.textContent?.toLowerCase().includes('save') ||
-                    el.value?.toLowerCase().includes('save') ||
-                    el.textContent?.includes('حفظ')
-                ),
-                // البحث باستخدام الكلاسات
-                ...Array.from(document.querySelectorAll('.save-button, .x-btn-text, .x-btn')),
-                // البحث باستخدام الأيقونات
-                ...Array.from(document.querySelectorAll('i.fa-save, span.save-icon, img[src*="save"]')),
-                // البحث في العناصر التي تحتوي على كلمة Save في خصائصها
-                ...Array.from(document.querySelectorAll('[class*="save" i], [id*="save" i]'))
-            ];
-
-            const saveButton = possibleSaveButtons[0];
+        // البحث عن زر الحفظ والنقر عليه
+        const saveButtonClicked = await page.evaluate(() => {
+            const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
+                .find(btn => 
+                    btn.textContent.toLowerCase().includes('save') || 
+                    btn.textContent.includes('حفظ') ||
+                    btn.value?.toLowerCase().includes('save')
+                );
             if (saveButton) {
-                console.log('تم العثور على زر الحفظ:', saveButton.outerHTML);
                 saveButton.click();
                 return true;
             }
             return false;
         });
 
-        // إذا لم يتم العثور على زر الحفظ، نجرب طريقة أخرى
-        if (!saveClicked) {
-            // محاولة النقر باستخدام selector مباشر
-            try {
-                await page.click('button.x-btn-text');
-                console.log('تم النقر على زر الحفظ باستخدام selector مباشر');
-            } catch (err) {
-                // محاولة البحث عن أي زر قد يكون زر الحفظ
-                const buttonFound = await page.evaluate(() => {
-                    const buttons = Array.from(document.querySelectorAll('button, .x-btn, .btn'));
-                    if (buttons.length > 0) {
-                        buttons[buttons.length - 1].click(); // غالباً ما يكون زر الحفظ هو آخر زر
-                        return true;
-                    }
-                    return false;
-                });
-
-                if (!buttonFound) {
-                    throw new Error('لم يتم العثور على زر الحفظ');
-                }
-            }
+        if (!saveButtonClicked) {
+            throw new Error('لم يتم العثور على زر الحفظ');
         }
 
-        // انتظار بعد الحفظ
-        await page.waitForTimeout(3000);
+        console.log('تم النقر على زر الحفظ');
 
-        // التقاط صورة نهائية
-        const finalScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        // انتظار لفترة قصيرة
+        await page.waitForTimeout(5000);
 
-        return {
-            success: true,
-            firstPageScreenshot,
-            editPageScreenshot: editPageBeforeScreenshot,
-            finalScreenshot,
-            message: 'تم تحديث معرف المتصل بنجاح'
-        };
+        // التقاط صورة بعد محاولة الحفظ
+        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
+        // التحقق من القيمة الفعلية لمعرف المتصل
+        const actualCallerId = await page.evaluate(() => {
+            const callerIdField = document.querySelector('input[name="callerid"]');
+            return callerIdField ? callerIdField.value : null;
+        });
+
+        if (actualCallerId !== newCallerId) {
+            throw new Error(`لم يتم تحديث معرف المتصل. القيمة الحالية: ${actualCallerId}`);
+        }
+
+        console.log('تم تحديث معرف المتصل بنجاح');
+
+        return { success: true, screenshot, actualCallerId };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
         const errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw {
-            message: `فشل تحديث معرف المتصل: ${error.message}`,
-            screenshot: errorScreenshot
-        };
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
     }
 }
 
