@@ -277,22 +277,11 @@ async function updateCallerId(page, newCallerId) {
         await page.setDefaultNavigationTimeout(60000);
         await page.setDefaultTimeout(60000);
 
-        // الانتقال إلى الصفحة الرئيسية مع محاولات إعادة المحاولة
-        const maxRetries = 3;
-        let retryCount = 0;
-        while (retryCount < maxRetries) {
-            try {
-                await page.goto('http://sip.vipcaller.net/mbilling/', {
-                    waitUntil: 'networkidle0',
-                    timeout: 60000
-                });
-                break;
-            } catch (error) {
-                retryCount++;
-                if (retryCount === maxRetries) throw error;
-                await page.waitForTimeout(5000);
-            }
-        }
+        // الانتقال إلى الصفحة الرئيسية
+        await page.goto('http://sip.vipcaller.net/mbilling/', {
+            waitUntil: 'networkidle0',
+            timeout: 60000
+        });
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
         // انتظار تحميل العناصر الأساسية
@@ -302,67 +291,60 @@ async function updateCallerId(page, newCallerId) {
         }, { timeout: 60000 });
         console.log('تم تحميل الصفحة بالكامل');
 
-        // البحث عن وفتح SIP Users مع التحقق من النجاح
-        const sipUsersClicked = await page.evaluate(async () => {
-            const findAndClickSipUsers = () => {
-                // البحث في جميع العناصر المرئية
-                const elements = document.querySelectorAll('*');
-                for (const el of elements) {
-                    if (el.textContent && 
-                        el.textContent.includes('SIP Users') && 
-                        (el.offsetWidth > 0 || el.getClientRects().length > 0)) {
-                        el.click();
-                        return true;
-                    }
-                }
-                return false;
-            };
+        // انتظار ظهور وكليك على SIP Users
+        await page.waitForFunction(() => {
+            const elements = Array.from(document.querySelectorAll('*'));
+            return elements.some(el => 
+                el.textContent && 
+                el.textContent.includes('SIP Users') && 
+                (el.offsetWidth > 0 || el.getClientRects().length > 0)
+            );
+        }, { timeout: 60000 });
 
-            // محاولات متعددة للنقر
-            for (let i = 0; i < 3; i++) {
-                if (findAndClickSipUsers()) return true;
-                await new Promise(resolve => setTimeout(resolve, 2000));
+        await page.evaluate(() => {
+            const elements = Array.from(document.querySelectorAll('*'));
+            const sipUsersElement = elements.find(el => 
+                el.textContent && 
+                el.textContent.includes('SIP Users') && 
+                (el.offsetWidth > 0 || el.getClientRects().length > 0)
+            );
+            if (sipUsersElement) sipUsersElement.click();
+        });
+        console.log('تم النقر على SIP Users');
+
+        // انتظار ظهور الجدول
+        await page.waitForFunction(() => {
+            return document.querySelector('table') !== null;
+        }, { timeout: 60000 });
+
+        // انتظار إضافي للتأكد من تحميل البيانات
+        await page.waitForTimeout(2000);
+
+        // البحث عن صف المستخدم والنقر عليه - تحديث هذا الجزء
+        const userFound = await page.evaluate(() => {
+            // البحث في كل الصفوف في الجدول
+            const rows = Array.from(document.querySelectorAll('tr'));
+            
+            for (const row of rows) {
+                // نبحث عن الصف الذي يحتوي على VIP5765B
+                if (row.textContent.includes('VIP5765B')) {
+                    // إما ننقر على الرابط داخل الصف أو على الصف نفسه
+                    const link = row.querySelector('a') || row;
+                    link.click();
+                    return true;
+                }
             }
             return false;
         });
 
-        if (!sipUsersClicked) {
-            throw new Error('فشل في العثور على أو النقر على SIP Users');
+        if (!userFound) {
+            throw new Error('لم يتم العثور على صف المستخدم VIP5765B');
         }
-        console.log('تم النقر على SIP Users');
-
-        // انتظار تحميل جدول المستخدمين
-        await page.waitForFunction(() => {
-            return !!document.querySelector('table') || 
-                   !!document.querySelector('.x-grid3') ||
-                   !!document.querySelector('[role="grid"]');
-        }, { timeout: 60000 });
-
-        // البحث عن اسم المستخدم والنقر عليه
-        const userRowClicked = await page.evaluate((username) => {
-            const findAndClickUserRow = () => {
-                const rows = document.querySelectorAll('tr');
-                for (const row of rows) {
-                    if (row.textContent.includes(username)) {
-                        const clickableElement = row.querySelector('a') || row;
-                        clickableElement.click();
-                        return true;
-                    }
-                }
-                return false;
-            };
-
-            return findAndClickUserRow();
-        }, newCallerId);
-
-        if (!userRowClicked) {
-            throw new Error('لم يتم العثور على صف المستخدم');
-        }
+        console.log('تم النقر على صف المستخدم');
 
         // انتظار ظهور نموذج التحرير
         await page.waitForFunction(() => {
-            return !!document.querySelector('input[name="callerid"]') ||
-                   !!document.querySelector('form');
+            return document.querySelector('input[name="callerid"]') !== null;
         }, { timeout: 60000 });
 
         // تحديث معرف المتصل
@@ -376,26 +358,23 @@ async function updateCallerId(page, newCallerId) {
 
         // البحث عن زر الحفظ والنقر عليه
         const saveClicked = await page.evaluate(() => {
-            const findAndClickSaveButton = () => {
-                const buttons = document.querySelectorAll('button, input[type="submit"]');
-                for (const button of buttons) {
-                    if (button.textContent.toLowerCase().includes('save') ||
-                        button.textContent.includes('حفظ')) {
-                        button.click();
-                        return true;
-                    }
-                }
-                return false;
-            };
-
-            return findAndClickSaveButton();
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+            const saveButton = buttons.find(btn => 
+                btn.textContent.toLowerCase().includes('save') || 
+                btn.textContent.includes('حفظ')
+            );
+            if (saveButton) {
+                saveButton.click();
+                return true;
+            }
+            return false;
         });
 
         if (!saveClicked) {
             throw new Error('لم يتم العثور على زر الحفظ');
         }
 
-        // انتظار ظهور رسالة النجاح أو اكتمال العملية
+        // انتظار اكتمال العملية
         await page.waitForFunction(() => {
             return document.body.innerText.includes('Success') ||
                    document.body.innerText.includes('نجاح') ||
@@ -414,6 +393,7 @@ async function updateCallerId(page, newCallerId) {
         };
     }
 }
+
 
 
 
