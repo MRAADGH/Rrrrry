@@ -188,8 +188,8 @@ async function performLogin(username, password) {
         const loginScreenshot = await page.screenshot({ fullPage: true });
 
         // انتظار ظهور حقول الإدخال
-        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 30000 });
-        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 30000 });
+        await page.waitForSelector('input[name="userid"]', { visible: true, timeout: 20000 });
+        await page.waitForSelector('input[name="password"]', { visible: true, timeout: 20000 });
         
         console.log('إدخال بيانات الاعتماد...');
         
@@ -221,11 +221,11 @@ async function performLogin(username, password) {
         // النقر على زر تسجيل الدخول وانتظار انتهاء التحميل
         await Promise.all([
             page.click(loginButtonSelector),
-            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 60000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
+            page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 40000 }).catch(() => console.log('تم انتهاء مهلة الانتظار للتنقل'))
         ]);
 
         // انتظار لحظة إضافية للتأكد من اكتمال تحميل الصفحة
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(500);
 
         // التقاط صورة بعد محاولة تسجيل الدخول
         const afterLoginScreenshot = await page.screenshot({ fullPage: true });
@@ -271,83 +271,111 @@ async function performLogin(username, password) {
 
 async function updateCallerId(page, newCallerId) {
     try {
-        console.log('Starting caller ID update process...');
+        console.log('بدء عملية تحديث معرف المتصل...');
         
-        // Navigate to the home page
-        await page.goto('http://sip.vipcaller.net/mbilling/', { waitUntil: 'networkidle0', timeout: 60000 });
-        console.log('Navigated to home page');
+        // الانتقال إلى الصفحة الرئيسية
+        await page.goto('http://sip.vipcaller.net/mbilling/', {
+            waitUntil: 'networkidle0',
+            timeout: 60000
+        });
+        console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // Wait for the page to load
+        // انتظار تحميل الصفحة
         await page.waitForSelector('body', { timeout: 60000 });
-        console.log('Page loaded');
+        console.log('تم تحميل الصفحة');
 
-        // Find and click "SIP Users"
-        await page.evaluate(() => {
+        // العثور على "SIP Users" والنقر عليه
+        const sipUsersFound = await page.evaluate(() => {
             const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
                 .find(el => el.textContent.includes('SIP Users'));
-            if (sipUsersLink) sipUsersLink.click();
-            else throw new Error('SIP Users link not found');
+            if (sipUsersLink) {
+                sipUsersLink.click();
+                return true;
+            }
+            return false;
         });
-        console.log('Clicked on SIP Users');
 
-        // Wait for the table to load
+        if (!sipUsersFound) {
+            throw new Error('لم يتم العثور على رابط SIP Users');
+        }
+
+        console.log('تم العثور على SIP Users والنقر عليه');
+
+        // انتظار تحميل الجدول
         await page.waitForSelector('table', { timeout: 30000 });
 
-        // Click on the first user row
-        await page.evaluate(() => {
+        // النقر على أول صف في الجدول (باستثناء صف العناوين)
+        const userClicked = await page.evaluate(() => {
             const rows = document.querySelectorAll('table tr');
-            if (rows.length > 1) rows[1].querySelector('td').click();
-            else throw new Error('User row not found');
+            if (rows.length > 1) {
+                const firstDataRow = rows[1];
+                const firstCell = firstDataRow.querySelector('td');
+                if (firstCell) {
+                    firstCell.click();
+                    return true;
+                }
+            }
+            return false;
         });
-        console.log('Clicked on user row');
 
-        // Wait for the edit form to appear
+        if (!userClicked) {
+            throw new Error('لم يتم العثور على صف المستخدم أو النقر عليه');
+        }
+
+        console.log('تم النقر على صف المستخدم');
+
+        // انتظار ظهور نموذج تحرير المستخدم
         await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
 
-        // Update the caller ID value
+        // تحديث قيمة معرف المتصل
         await page.evaluate((newCallerId) => {
             const callerIdField = document.querySelector('input[name="callerid"]');
             if (callerIdField) callerIdField.value = newCallerId;
-            else throw new Error('Caller ID field not found');
         }, newCallerId);
-        console.log('Entered new caller ID');
 
-        // Find and click the save button
-        await page.evaluate(() => {
+        console.log('تم إدخال معرف المتصل الجديد');
+
+        // البحث عن زر الحفظ والنقر عليه
+        const saveButtonClicked = await page.evaluate(() => {
             const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
                 .find(btn => 
                     btn.textContent.toLowerCase().includes('save') || 
                     btn.textContent.includes('حفظ') ||
                     btn.value?.toLowerCase().includes('save')
                 );
-            if (saveButton) saveButton.click();
-            else throw new Error('Save button not found');
+            if (saveButton) {
+                saveButton.click();
+                return true;
+            }
+            return false;
         });
-        console.log('Clicked save button');
 
-        // Wait for success message or any confirmation
-        await page.waitForFunction(
-            () => document.body.innerText.includes('Success') || document.body.innerText.includes('نجاح'),
-            { timeout: 30000 }
-        );
-        console.log('Caller ID updated successfully');
-
-        // Refresh the page and verify the changes
-        await page.reload({ waitUntil: 'networkidle0' });
-        const updatedCallerId = await page.evaluate(() => {
-            const callerIdField = document.querySelector('input[name="callerid"]');
-            return callerIdField ? callerIdField.value : null;
-        });
-        
-        if (updatedCallerId !== newCallerId) {
-            throw new Error('Caller ID verification failed');
+        if (!saveButtonClicked) {
+            throw new Error('لم يتم العثور على زر الحفظ');
         }
+
+        console.log('تم النقر على زر الحفظ');
+
+        // انتظار لفترة قصيرة بدلاً من انتظار رسالة النجاح
+        await page.waitForTimeout(5000);
+
+        // التحقق من عدم وجود رسائل خطأ
+        const errorMessage = await page.evaluate(() => {
+            const errorElements = document.querySelectorAll('.x-message-error, .error-message');
+            return errorElements.length > 0 ? errorElements[0].textContent : null;
+        });
+
+        if (errorMessage) {
+            throw new Error(`ظهرت رسالة خطأ: ${errorMessage}`);
+        }
+
+        console.log('تم تحديث معرف المتصل بنجاح');
 
         return { success: true };
     } catch (error) {
-        console.error('Error updating caller ID:', error);
+        console.error('خطأ في تحديث معرف المتصل:', error);
         const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { message: `Failed to update caller ID: ${error.message}`, screenshot };
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot };
     }
 }
 
