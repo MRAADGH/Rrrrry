@@ -133,36 +133,39 @@ bot.on('message', async (msg) => {
                 }
                 break;
             case STATES.WAITING_CALLER_ID:
-                const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
-                const currentSession = userSessions.get(chatId);
-                
-                try {
-                    const updateResult = await updateCallerId(currentSession.page, msg.text);
-                    if (updateResult.success) {
-                        bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${msg.text}`, {
-                            chat_id: chatId,
-                            message_id: updateMessage.message_id
-                        });
-                    } else {
-                        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
-                            chat_id: chatId,
-                            message_id: updateMessage.message_id
-                        });
-                    }
-                } catch (error) {
-                    console.error('خطأ في تغيير معرف المتصل:', error);
-                    bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
-                        chat_id: chatId,
-                        message_id: updateMessage.message_id
-                    });
-                }
-                
-                userStates.set(chatId, STATES.IDLE);
-                if (currentSession.page) {
-                    await currentSession.page.close();
-                }
-                userSessions.delete(chatId);
-                break;
+        const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
+        const currentSession = userSessions.get(chatId);
+        
+        try {
+            const updateResult = await updateCallerId(currentSession.page, msg.text);
+            if (updateResult.success) {
+                bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${msg.text}`, {
+                    chat_id: chatId,
+                    message_id: updateMessage.message_id
+                });
+            } else {
+                bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${updateResult.error}`, {
+                    chat_id: chatId,
+                    message_id: updateMessage.message_id
+                });
+            }
+        } catch (error) {
+            console.error('خطأ في تغيير معرف المتصل:', error);
+            bot.editMessageText(`❌ حدث خطأ أثناء محاولة تغيير معرف المتصل. ${error.message}`, {
+                chat_id: chatId,
+                message_id: updateMessage.message_id
+            });
+            if (error.screenshot) {
+                await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+            }
+        }
+        
+        userStates.set(chatId, STATES.IDLE);
+        if (currentSession.page) {
+            await currentSession.page.close();
+        }
+        userSessions.delete(chatId);
+        break;
             default:
                 bot.sendMessage(chatId, 'عذرًا، لم أفهم طلبك. يرجى استخدام الأمر /start للبدء من جديد.');
         }
@@ -281,106 +284,122 @@ async function updateCallerId(page, newCallerId) {
         await page.waitForSelector('body', { timeout: 60000 });
         console.log('تم تحميل الصفحة');
 
-        // التحقق من وجود القائمة الجانبية
-        const sidebarExists = await page.evaluate(() => {
-            return !!document.querySelector('.x-tree-root-node');
+        // محاولة العثور على القائمة الجانبية أو أي عنصر تنقل بديل
+        const navigationElement = await page.evaluate(() => {
+            const sidebar = document.querySelector('.x-tree-root-node');
+            if (sidebar) return { type: 'sidebar', element: sidebar };
+            
+            const menu = document.querySelector('.x-menu-list');
+            if (menu) return { type: 'menu', element: menu };
+            
+            const tabs = document.querySelector('.x-tab-panel');
+            if (tabs) return { type: 'tabs', element: tabs };
+            
+            return null;
         });
 
-        if (sidebarExists) {
-            console.log('تم العثور على القائمة الجانبية');
+        if (navigationElement) {
+            console.log(`تم العثور على عنصر التنقل: ${navigationElement.type}`);
             
-            // البحث عن وفتح قائمة "Clients" إذا كانت موجودة
-            const clientsNodeExists = await page.evaluate(() => {
-                const clientsNode = Array.from(document.querySelectorAll('.x-tree-node-el')).find(el => el.textContent.includes('Clients'));
-                if (clientsNode) {
-                    if (!clientsNode.classList.contains('x-tree-node-expanded')) {
-                        clientsNode.querySelector('.x-tree-ec-icon').click();
+            // البحث عن وفتح قسم "Clients" أو "SIP Users" بناءً على نوع عنصر التنقل
+            let sipUsersFound = false;
+            
+            if (navigationElement.type === 'sidebar') {
+                sipUsersFound = await page.evaluate(() => {
+                    const clientsNode = Array.from(document.querySelectorAll('.x-tree-node-el')).find(el => el.textContent.includes('Clients'));
+                    if (clientsNode) {
+                        if (!clientsNode.classList.contains('x-tree-node-expanded')) {
+                            clientsNode.querySelector('.x-tree-ec-icon').click();
+                        }
+                        const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor span:not(.x-tree-node-icon)'))
+                            .find(el => el.textContent.includes('SIP Users'));
+                        if (sipUsersLink) {
+                            sipUsersLink.click();
+                            return true;
+                        }
                     }
-                    return true;
-                }
-                return false;
-            });
-
-            if (clientsNodeExists) {
-                console.log('تم العثور على قائمة Clients وفتحها');
-                
-                // انتظار ظهور "SIP Users" وفحصه
-                await page.waitForFunction(
-                    () => !!document.querySelector('.x-tree-node-anchor span:not(.x-tree-node-icon)'),
-                    { timeout: 30000 }
-                );
-                
-                // النقر على "SIP Users"
-                const sipUsersClicked = await page.evaluate(() => {
-                    const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor span:not(.x-tree-node-icon)'))
+                    return false;
+                });
+            } else if (navigationElement.type === 'menu') {
+                sipUsersFound = await page.evaluate(() => {
+                    const sipUsersMenuItem = Array.from(document.querySelectorAll('.x-menu-item-text'))
                         .find(el => el.textContent.includes('SIP Users'));
-                    if (sipUsersLink) {
-                        sipUsersLink.click();
+                    if (sipUsersMenuItem) {
+                        sipUsersMenuItem.click();
+                        return true;
+                    }
+                    return false;
+                });
+            } else if (navigationElement.type === 'tabs') {
+                sipUsersFound = await page.evaluate(() => {
+                    const sipUsersTab = Array.from(document.querySelectorAll('.x-tab-strip-text'))
+                        .find(el => el.textContent.includes('SIP Users'));
+                    if (sipUsersTab) {
+                        sipUsersTab.click();
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            if (sipUsersFound) {
+                console.log('تم العثور على قسم SIP Users والنقر عليه');
+
+                // انتظار تحميل جدول المستخدمين
+                await page.waitForSelector('.x-grid3-row', { timeout: 30000 });
+
+                // النقر على أول مستخدم في القائمة
+                await page.click('.x-grid3-row');
+                console.log('تم النقر على المستخدم');
+
+                // انتظار ظهور حقل معرف المتصل
+                await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
+                console.log('تم العثور على حقل معرف المتصل');
+
+                // مسح القيمة الحالية وإدخال القيمة الجديدة
+                await page.$eval('input[name="callerid"]', (el, value) => el.value = value, newCallerId);
+                console.log('تم إدخال معرف المتصل الجديد');
+
+                // البحث عن زر الحفظ والنقر عليه
+                const saveButtonClicked = await page.evaluate(() => {
+                    const buttons = Array.from(document.querySelectorAll('button, .x-btn'));
+                    const saveButton = buttons.find(button => 
+                        button.textContent.toLowerCase().includes('save') || 
+                        button.textContent.includes('حفظ')
+                    );
+                    if (saveButton) {
+                        saveButton.click();
                         return true;
                     }
                     return false;
                 });
 
-                if (sipUsersClicked) {
-                    console.log('تم النقر على SIP Users');
+                if (saveButtonClicked) {
+                    console.log('تم النقر على زر الحفظ');
 
-                    // انتظار تحميل جدول المستخدمين
-                    await page.waitForSelector('.x-grid3-row', { timeout: 30000 });
+                    // انتظار ظهور رسالة النجاح
+                    await page.waitForFunction(
+                        () => document.body.innerText.includes('Success') || document.body.innerText.includes('نجاح'),
+                        { timeout: 30000 }
+                    );
+                    console.log('تم تحديث معرف المتصل بنجاح');
 
-                    // النقر على أول مستخدم في القائمة
-                    await page.click('.x-grid3-row');
-                    console.log('تم النقر على المستخدم');
-
-                    // انتظار ظهور حقل معرف المتصل
-                    await page.waitForSelector('input[name="callerid"]', { visible: true, timeout: 30000 });
-                    console.log('تم العثور على حقل معرف المتصل');
-
-                    // مسح القيمة الحالية وإدخال القيمة الجديدة
-                    await page.$eval('input[name="callerid"]', (el, value) => el.value = value, newCallerId);
-                    console.log('تم إدخال معرف المتصل الجديد');
-
-                    // البحث عن زر الحفظ والنقر عليه
-                    const saveButtonClicked = await page.evaluate(() => {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const saveButton = buttons.find(button => button.textContent.includes('Save'));
-                        if (saveButton) {
-                            saveButton.click();
-                            return true;
-                        }
-                        return false;
-                    });
-
-                    if (saveButtonClicked) {
-                        console.log('تم النقر على زر الحفظ');
-
-                        // انتظار ظهور رسالة النجاح
-                        await page.waitForFunction(
-                            () => document.body.innerText.includes('Success'),
-                            { timeout: 30000 }
-                        );
-                        console.log('تم تحديث معرف المتصل بنجاح');
-
-                        return { success: true };
-                    } else {
-                        throw new Error('لم يتم العثور على زر الحفظ');
-                    }
+                    return { success: true };
                 } else {
-                    throw new Error('لم يتم العثور على رابط SIP Users');
+                    throw new Error('لم يتم العثور على زر الحفظ');
                 }
             } else {
-                throw new Error('لم يتم العثور على قائمة Clients');
+                throw new Error('لم يتم العثور على قسم SIP Users');
             }
         } else {
-            throw new Error('لم يتم العثور على القائمة الجانبية');
+            throw new Error('لم يتم العثور على أي عنصر تنقل معروف');
         }
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
-        await page.screenshot({ path: 'update-error.png', fullPage: true });
-        throw new Error(`فشل تحديث معرف المتصل: ${error.message}`);
+        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot };
     }
 }
-
-
 
 
 process.on('SIGINT', async () => {
