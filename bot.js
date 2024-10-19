@@ -132,33 +132,15 @@ bot.on('message', async (msg) => {
                     userStates.set(chatId, STATES.IDLE);
                 }
                 break;
-         case STATES.WAITING_CALLER_ID:
+            case STATES.WAITING_CALLER_ID:
     const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
     const currentSession = userSessions.get(chatId);
     
     try {
         const updateResult = await updateCallerId(currentSession.page, msg.text);
-        
-        // إرسال صورة الصفحة الأولى
-        if (updateResult.firstPageScreenshot) {
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.firstPageScreenshot, 'base64'), 
-                { caption: 'صفحة SIP Users' });
-        }
-        
-        // إرسال صورة صفحة التحرير
-        if (updateResult.editPageScreenshot) {
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.editPageScreenshot, 'base64'), 
-                { caption: 'صفحة تحرير معرف المتصل' });
-        }
-
-        // إرسال الصورة النهائية
-        if (updateResult.finalScreenshot) {
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.finalScreenshot, 'base64'), 
-                { caption: 'صفحة بعد محاولة الحفظ' });
-        }
-        
         if (updateResult.success) {
-            bot.editMessageText('✅ تم تغيير معرف المتصل بنجاح!', {
+            await bot.sendPhoto(chatId, Buffer.from(updateResult.screenshot, 'base64'), { caption: 'صورة بعد محاولة تحديث معرف المتصل' });
+            bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
                 chat_id: chatId,
                 message_id: updateMessage.message_id
             });
@@ -167,16 +149,18 @@ bot.on('message', async (msg) => {
         }
     } catch (error) {
         console.error('خطأ في تغيير معرف المتصل:', error);
-        if (error.screenshot) {
-            await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), 
-                { caption: 'صورة الخطأ' });
-        }
+        await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
         bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}`, {
             chat_id: chatId,
             message_id: updateMessage.message_id
         });
     }
-    
+    // التقاط صورة للشاشة بعد الوصول إلى صفحة تغيير معرف المتصل
+const callerIdPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+await bot.sendPhoto(chatId, Buffer.from(callerIdPageScreenshot, 'base64'), { caption: 'تم الوصول إلى صفحة تغيير معرف المتصل' });
+
+console.log('تم إرسال صورة لصفحة تغيير معرف المتصل إلى البوت');
+
     userStates.set(chatId, STATES.IDLE);
     if (currentSession.page) {
         await currentSession.page.close();
@@ -284,6 +268,8 @@ async function performLogin(username, password) {
 
 // ... [Rest of the code remains the same] ...
 
+
+
 async function updateCallerId(page, newCallerId) {
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
@@ -300,28 +286,31 @@ async function updateCallerId(page, newCallerId) {
         console.log('تم تحميل الصفحة');
 
         // العثور على "SIP Users" والنقر عليه
-        const sipUsersFound = await page.evaluate(() => {
-            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
-                .find(el => el.textContent.includes('SIP Users'));
-            if (sipUsersLink) {
-                sipUsersLink.click();
-                return true;
-            }
-            return false;
-        });
+const sipUsersFound = await page.evaluate(() => {
+    const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
+        .find(el => el.textContent.includes('SIP Users'));
+    if (sipUsersLink) {
+        sipUsersLink.click();
+        return true;
+    }
+    return false;
+});
 
-        if (!sipUsersFound) {
-            throw new Error('لم يتم العثور على رابط SIP Users');
-        }
+if (!sipUsersFound) {
+    throw new Error('لم يتم العثور على رابط SIP Users');
+}
 
-        console.log('تم العثور على SIP Users والنقر عليه');
-        
-        // انتظار التنقل بعد النقر على SIP Users
-        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 });
+console.log('تم العثور على SIP Users والنقر عليه');
 
-        // التقاط صورة الصفحة التي تم الانتقال إليها
-        const sipUsersScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        await bot.sendPhoto(chatId, Buffer.from(sipUsersScreenshot, 'base64'), { caption: 'صورة صفحة SIP Users بعد النقر' });
+// انتظار تحميل صفحة تغيير معرف المتصل
+await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
+console.log('تم الانتقال إلى صفحة تغيير معرف المتصل');
+
+// التقاط صورة للشاشة بعد الوصول إلى صفحة تغيير معرف المتصل
+const callerIdPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+await bot.sendPhoto(chatId, Buffer.from(callerIdPageScreenshot, 'base64'), { caption: 'تم الوصول إلى صفحة تغيير معرف المتصل' });
+
+console.log('تم إرسال صورة لصفحة تغيير معرف المتصل إلى البوت');
 
         // انتظار تحميل الجدول
         await page.waitForSelector('table', { timeout: 30000 });
@@ -411,4 +400,3 @@ process.on('SIGINT', async () => {
     }
     process.exit();
 });
-
