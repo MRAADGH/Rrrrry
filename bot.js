@@ -139,13 +139,15 @@ bot.on('message', async (msg) => {
     try {
         const updateResult = await updateCallerId(currentSession.page, msg.text);
         if (updateResult.success) {
-            // إرسال صورة صفحة تغيير معرف المتصل
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.callerIdPageScreenshot, 'base64'), { caption: 'صورة صفحة تغيير معرف المتصل' });
-            
-            // إرسال صورة بعد محاولة الحفظ
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.afterSaveScreenshot, 'base64'), { caption: 'صورة بعد محاولة حفظ معرف المتصل الجديد' });
-            
-            bot.editMessageText(updateResult.message, {
+            if (updateResult.screenshot) {
+                try {
+                    await bot.sendPhoto(chatId, Buffer.from(updateResult.screenshot, 'base64'), { caption: 'صورة بعد محاولة تحديث معرف المتصل' });
+                } catch (photoError) {
+                    console.error('خطأ في إرسال الصورة:', photoError);
+                    await bot.sendMessage(chatId, 'تم تحديث معرف المتصل بنجاح، ولكن فشل إرسال الصورة.');
+                }
+            }
+            bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
                 chat_id: chatId,
                 message_id: updateMessage.message_id
             });
@@ -155,7 +157,11 @@ bot.on('message', async (msg) => {
     } catch (error) {
         console.error('خطأ في تغيير معرف المتصل:', error);
         if (error.screenshot) {
-            await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+            try {
+                await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
+            } catch (photoError) {
+                console.error('خطأ في إرسال صورة الخطأ:', photoError);
+            }
         }
         bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}`, {
             chat_id: chatId,
@@ -368,23 +374,23 @@ async function updateCallerId(page, newCallerId) {
         // Capture screenshot after save attempt
         const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
-        // Verify the actual caller ID value
+        // التحقق من القيمة الفعلية لمعرف المتصل
         const actualCallerId = await page.evaluate(() => {
             const callerIdField = document.querySelector('input[name="callerid"]');
             return callerIdField ? callerIdField.value : null;
         });
 
         if (actualCallerId !== newCallerId) {
-            throw new Error(`Caller ID not updated. Current value: ${actualCallerId}`);
+            throw new Error(`لم يتم تحديث معرف المتصل. القيمة الحالية: ${actualCallerId}`);
         }
 
-        console.log('Caller ID updated successfully');
+        console.log('تم تحديث معرف المتصل بنجاح');
 
         return { success: true, screenshot, actualCallerId };
     } catch (error) {
-        console.error('Error updating caller ID:', error);
+        console.error('خطأ في تحديث معرف المتصل:', error);
         const errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { message: `Failed to update caller ID: ${error.message}`, screenshot: errorScreenshot };
+        return { success: false, message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
     }
 }
 
