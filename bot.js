@@ -292,60 +292,69 @@ async function updateCallerId(page, newCallerId) {
         console.log('تم تحميل الصفحة بالكامل');
 
         // انتظار ظهور وكليك على SIP Users
-        await page.waitForFunction(() => {
-            const elements = Array.from(document.querySelectorAll('*'));
-            return elements.some(el => 
-                el.textContent && 
-                el.textContent.includes('SIP Users') && 
-                (el.offsetWidth > 0 || el.getClientRects().length > 0)
-            );
-        }, { timeout: 60000 });
-
+        await page.waitForSelector('text/SIP Users', { timeout: 60000 });
+        
         await page.evaluate(() => {
             const elements = Array.from(document.querySelectorAll('*'));
             const sipUsersElement = elements.find(el => 
-                el.textContent && 
-                el.textContent.includes('SIP Users') && 
+                el.textContent?.trim() === 'SIP Users' && 
                 (el.offsetWidth > 0 || el.getClientRects().length > 0)
             );
-            if (sipUsersElement) sipUsersElement.click();
-        });
-        console.log('تم النقر على SIP Users');
-
-        // انتظار ظهور الجدول
-        await page.waitForFunction(() => {
-            return document.querySelector('table') !== null;
-        }, { timeout: 60000 });
-
-        // انتظار إضافي للتأكد من تحميل البيانات
-        await page.waitForTimeout(2000);
-
-        // البحث عن صف المستخدم والنقر عليه - تحديث هذا الجزء
-        const userFound = await page.evaluate(() => {
-            // البحث في كل الصفوف في الجدول
-            const rows = Array.from(document.querySelectorAll('tr'));
-            
-            for (const row of rows) {
-                // نبحث عن الصف الذي يحتوي على VIP5765B
-                if (row.textContent.includes('VIP5765B')) {
-                    // إما ننقر على الرابط داخل الصف أو على الصف نفسه
-                    const link = row.querySelector('a') || row;
-                    link.click();
-                    return true;
-                }
+            if (sipUsersElement) {
+                sipUsersElement.click();
+                return true;
             }
             return false;
         });
+        console.log('تم النقر على SIP Users');
 
-        if (!userFound) {
-            throw new Error('لم يتم العثور على صف المستخدم VIP5765B');
+        // انتظار تحميل الجدول وظهور البيانات
+        await page.waitForFunction(() => {
+            const table = document.querySelector('table');
+            const rows = table ? table.querySelectorAll('tr') : [];
+            return rows.length > 1; // نتأكد من وجود صفوف في الجدول
+        }, { timeout: 60000 });
+
+        // انتظار إضافي للتأكد من اكتمال تحميل البيانات
+        await page.waitForTimeout(3000);
+
+        // التقاط صورة بعد النقر على SIP Users
+        const screenshotAfterSIPUsers = await page.screenshot({ 
+            fullPage: true,
+            encoding: 'base64'
+        });
+
+        // النقر على صف المستخدم
+        const userClicked = await page.evaluate(() => {
+            try {
+                // البحث عن الجدول وصفوفه
+                const table = document.querySelector('table');
+                if (!table) return { success: false, error: 'لم يتم العثور على الجدول' };
+
+                // البحث عن أول صف يحتوي على بيانات (تجاهل صف العناوين)
+                const rows = Array.from(table.querySelectorAll('tr')).slice(1);
+                if (rows.length === 0) return { success: false, error: 'لم يتم العثور على أي صفوف في الجدول' };
+
+                // محاولة النقر على الصف الأول
+                const firstRow = rows[0];
+                
+                // محاولة النقر على الرابط أو الخلية في الصف
+                const clickableElement = firstRow.querySelector('a') || firstRow.querySelector('td') || firstRow;
+                clickableElement.click();
+                
+                return { success: true };
+            } catch (error) {
+                return { success: false, error: error.message };
+            }
+        });
+
+        if (!userClicked.success) {
+            throw new Error(`فشل النقر على صف المستخدم: ${userClicked.error}`);
         }
         console.log('تم النقر على صف المستخدم');
 
-        // انتظار ظهور نموذج التحرير
-        await page.waitForFunction(() => {
-            return document.querySelector('input[name="callerid"]') !== null;
-        }, { timeout: 60000 });
+        // انتظار ظهور حقل معرف المتصل
+        await page.waitForSelector('input[name="callerid"]', { timeout: 60000 });
 
         // تحديث معرف المتصل
         await page.evaluate((newId) => {
@@ -382,14 +391,17 @@ async function updateCallerId(page, newCallerId) {
         }, { timeout: 60000 });
 
         console.log('تم تحديث معرف المتصل بنجاح');
-        return { success: true };
+        return { 
+            success: true,
+            screenshotAfterSIPUsers // إرجاع الصورة التي تم التقاطها بعد النقر على SIP Users
+        };
 
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
         const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
         throw { 
             message: `فشل تحديث معرف المتصل: ${error.message}`, 
-            screenshot 
+            screenshot: screenshot || error.screenshotAfterSIPUsers
         };
     }
 }
