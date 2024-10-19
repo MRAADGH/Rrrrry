@@ -304,14 +304,14 @@ async function updateCallerId(page, newCallerId) {
         // انتظار تحميل الجدول
         await page.waitForSelector('table', { timeout: 30000 });
 
-        // النقر على اسم المستخدم
+        // النقر على أول صف في الجدول (باستثناء صف العناوين)
         const userClicked = await page.evaluate(() => {
-            const userRow = Array.from(document.querySelectorAll('tr'))
-                .find(row => row.textContent.includes('VIP57658'));
-            if (userRow) {
-                const userNameCell = userRow.querySelector('td');
-                if (userNameCell) {
-                    userNameCell.click();
+            const rows = document.querySelectorAll('table tr');
+            if (rows.length > 1) {
+                const firstDataRow = rows[1];
+                const firstCell = firstDataRow.querySelector('td');
+                if (firstCell) {
+                    firstCell.click();
                     return true;
                 }
             }
@@ -319,10 +319,10 @@ async function updateCallerId(page, newCallerId) {
         });
 
         if (!userClicked) {
-            throw new Error('لم يتم العثور على اسم المستخدم أو النقر عليه');
+            throw new Error('لم يتم العثور على صف المستخدم أو النقر عليه');
         }
 
-        console.log('تم النقر على اسم المستخدم');
+        console.log('تم النقر على صف المستخدم');
 
         // انتظار ظهور نموذج تحرير المستخدم
         await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
