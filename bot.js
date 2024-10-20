@@ -132,15 +132,34 @@ bot.on('message', async (msg) => {
                     userStates.set(chatId, STATES.IDLE);
                 }
                 break;
-            case STATES.WAITING_CALLER_ID:
+          case STATES.WAITING_CALLER_ID:
     const updateMessage = await bot.sendMessage(chatId, 'جاري تغيير معرف المتصل... ⏳');
     const currentSession = userSessions.get(chatId);
     
     try {
         const updateResult = await updateCallerId(currentSession.page, msg.text);
         if (updateResult.success) {
-            await bot.sendPhoto(chatId, Buffer.from(updateResult.screenshot, 'base64'), { caption: 'صورة بعد محاولة تحديث معرف المتصل' });
-            bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
+            // Send all captured screenshots
+            const sendScreenshot = async (screenshot, caption) => {
+                if (screenshot) {
+                    try {
+                        const buffer = Buffer.from(screenshot, 'base64');
+                        await bot.sendPhoto(chatId, buffer, { caption });
+                    } catch (error) {
+                        console.error(`Error sending ${caption}:`, error);
+                    }
+                }
+            };
+
+            await Promise.all([
+                sendScreenshot(updateResult.homeScreenshot, 'الصفحة الرئيسية'),
+                sendScreenshot(updateResult.sipUsersScreenshot, 'صفحة SIP Users'),
+                sendScreenshot(updateResult.optionsPageScreenshot, 'صفحة الخيارات'),
+                sendScreenshot(updateResult.editUserScreenshot, 'صفحة تحرير المستخدم'),
+                sendScreenshot(updateResult.afterSaveScreenshot, 'بعد محاولة الحفظ')
+            ]);
+
+            await bot.editMessageText(`✅ تم تغيير معرف المتصل بنجاح إلى: ${updateResult.actualCallerId}`, {
                 chat_id: chatId,
                 message_id: updateMessage.message_id
             });
@@ -149,24 +168,42 @@ bot.on('message', async (msg) => {
         }
     } catch (error) {
         console.error('خطأ في تغيير معرف المتصل:', error);
-        await bot.sendPhoto(chatId, Buffer.from(error.screenshot, 'base64'), { caption: 'صورة الخطأ' });
-        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}`, {
+        
+        // Send error screenshots
+        const sendErrorScreenshot = async (screenshot, caption) => {
+            if (screenshot) {
+                try {
+                    const buffer = Buffer.from(screenshot, 'base64');
+                    await bot.sendPhoto(chatId, buffer, { caption });
+                } catch (err) {
+                    console.error(`Error sending error screenshot ${caption}:`, err);
+                }
+            }
+        };
+
+        await Promise.all([
+            sendErrorScreenshot(error.homeScreenshot, 'الصفحة الرئيسية'),
+            sendErrorScreenshot(error.sipUsersScreenshot, 'صفحة SIP Users'),
+            sendErrorScreenshot(error.optionsPageScreenshot, 'صفحة الخيارات'),
+            sendErrorScreenshot(error.editUserScreenshot, 'صفحة تحرير المستخدم'),
+            sendErrorScreenshot(error.afterSaveScreenshot, 'بعد محاولة الحفظ'),
+            sendErrorScreenshot(error.errorScreenshot, 'صورة الخطأ')
+        ]);
+
+        bot.editMessageText(`❌ فشل تغيير معرف المتصل. ${error.message}\nيرجى مراجعة الصور المرسلة للتفاصيل.`, {
             chat_id: chatId,
             message_id: updateMessage.message_id
         });
     }
-    // التقاط صورة للشاشة بعد الوصول إلى صفحة تغيير معرف المتصل
-const callerIdPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-await bot.sendPhoto(chatId, Buffer.from(callerIdPageScreenshot, 'base64'), { caption: 'تم الوصول إلى صفحة تغيير معرف المتصل' });
-
-console.log('تم إرسال صورة لصفحة تغيير معرف المتصل إلى البوت');
-
+    
     userStates.set(chatId, STATES.IDLE);
     if (currentSession.page) {
         await currentSession.page.close();
     }
     userSessions.delete(chatId);
     break;
+
+
             default:
                 bot.sendMessage(chatId, 'عذرًا، لم أفهم طلبك. يرجى استخدام الأمر /start للبدء من جديد.');
         }
@@ -266,77 +303,123 @@ async function performLogin(username, password) {
 // تحديث جزء معالجة الرسائل لإرسال الصورة
 
 
-// ... [Rest of the code remains the same] ...
 
 
 
 async function updateCallerId(page, newCallerId) {
+    let screenshots = {};
     try {
         console.log('بدء عملية تحديث معرف المتصل...');
         
-        // الانتقال إلى الصفحة الرئيسية
+        // التنقل إلى الصفحة الرئيسية
         await page.goto('http://sip.vipcaller.net/mbilling/', {
             waitUntil: 'networkidle0',
             timeout: 60000
         });
         console.log('تم الانتقال إلى الصفحة الرئيسية');
 
-        // انتظار تحميل الصفحة
-        await page.waitForSelector('body', { timeout: 60000 });
-        console.log('تم تحميل الصفحة');
+        // التقاط صورة للصفحة الرئيسية
+        screenshots.homeScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
-        // العثور على "SIP Users" والنقر عليه
-const sipUsersFound = await page.evaluate(() => {
-    const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
-        .find(el => el.textContent.includes('SIP Users'));
-    if (sipUsersLink) {
-        sipUsersLink.click();
-        return true;
-    }
-    return false;
-});
+        // البحث والنقر على "SIP Users"
+        const sipUsersFound = await page.evaluate(() => {
+            const sipUsersLink = Array.from(document.querySelectorAll('.x-tree-node-anchor, a, span, td'))
+                .find(el => el.textContent.includes('SIP Users'));
+            if (sipUsersLink) {
+                sipUsersLink.click();
+                return true;
+            }
+            return false;
+        });
 
-if (!sipUsersFound) {
-    throw new Error('لم يتم العثور على رابط SIP Users');
-}
+        if (!sipUsersFound) {
+            throw new Error('لم يتم العثور على رابط SIP Users');
+        }
 
-console.log('تم العثور على SIP Users والنقر عليه');
-
-// انتظار تحميل صفحة تغيير معرف المتصل
-await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
-console.log('تم الانتقال إلى صفحة تغيير معرف المتصل');
-
-// التقاط صورة للشاشة بعد الوصول إلى صفحة تغيير معرف المتصل
-const callerIdPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-await bot.sendPhoto(chatId, Buffer.from(callerIdPageScreenshot, 'base64'), { caption: 'تم الوصول إلى صفحة تغيير معرف المتصل' });
-
-console.log('تم إرسال صورة لصفحة تغيير معرف المتصل إلى البوت');
+        console.log('تم العثور على SIP Users والنقر عليه');
 
         // انتظار تحميل الجدول
         await page.waitForSelector('table', { timeout: 30000 });
 
-        // النقر على أول صف في الجدول (باستثناء صف العناوين)
+        // التقاط صورة لصفحة SIP Users
+        screenshots.sipUsersScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
+        // البحث عن الصف الذي يحتوي على "g729,gsm,alaw,ulaw" والنقر عليه
         const userClicked = await page.evaluate(() => {
-            const rows = document.querySelectorAll('table tr');
-            if (rows.length > 1) {
-                const firstDataRow = rows[1];
-                const firstCell = firstDataRow.querySelector('td');
-                if (firstCell) {
-                    firstCell.click();
-                    return true;
-                }
+            const rows = Array.from(document.querySelectorAll('table tr'));
+            const targetRow = rows.find(row => row.textContent.includes('g729,gsm,alaw,ulaw'));
+            if (targetRow) {
+                targetRow.click();
+                return true;
             }
             return false;
         });
 
         if (!userClicked) {
-            throw new Error('لم يتم العثور على صف المستخدم أو النقر عليه');
+            throw new Error('لم يتم العثور على الصف المطلوب أو النقر عليه');
         }
 
-        console.log('تم النقر على صف المستخدم');
+        console.log('تم النقر على الصف المحتوي على g729,gsm,alaw,ulaw');
 
-        // انتظار ظهور نموذج تحرير المستخدم
-        await page.waitForSelector('input[name="callerid"]', { timeout: 30000 });
+        // انتظار ظهور الخيارات
+        await page.waitForTimeout(5000);
+
+        // التقاط صورة للصفحة الحالية (صفحة الخيارات)
+        screenshots.optionsPageScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
+        // البحث عن زر التحرير والنقر عليه
+        const editClicked = await page.evaluate(() => {
+            const editButtons = Array.from(document.querySelectorAll('span, div, a, button, input[type="button"]'))
+                .filter(el => el.textContent.includes('Edit') || 
+                              el.textContent.includes('تعديل') ||
+                              el.textContent.includes('تحرير') ||
+                              el.value?.includes('Edit') ||
+                              el.value?.includes('تعديل') ||
+                              el.value?.includes('تحرير'));
+            
+            console.log('الأزرار المحتملة للتحرير:', editButtons.map(b => b.outerHTML));
+            
+            if (editButtons.length > 0) {
+                editButtons[0].click();
+                return true;
+            }
+            return false;
+        });
+
+        if (!editClicked) {
+            console.log('لم يتم العثور على زر التحرير. محاولة النقر على أي زر متاح...');
+            const anyButtonClicked = await page.evaluate(() => {
+                const buttons = Array.from(document.querySelectorAll('button, input[type="button"], .x-btn'));
+                console.log('جميع الأزرار المتاحة:', buttons.map(b => b.outerHTML));
+                if (buttons.length > 0) {
+                    buttons[0].click();
+                    return true;
+                }
+                return false;
+            });
+            if (!anyButtonClicked) {
+                throw new Error('لم يتم العثور على أي أزرار للنقر عليها');
+            }
+        }
+
+        console.log('تم النقر على زر التحرير أو أحد الأزرار المتاحة');
+
+        // انتظار تحميل نموذج التحرير
+        await page.waitForTimeout(5000);
+
+        // التقاط صورة لصفحة تحرير المستخدم
+        screenshots.editUserScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+
+        // البحث عن حقل معرف المتصل
+        const callerIdFieldFound = await page.evaluate(() => {
+            const field = document.querySelector('input[name="callerid"]');
+            console.log('حقل معرف المتصل:', field ? field.outerHTML : 'غير موجود');
+            return !!field;
+        });
+
+        if (!callerIdFieldFound) {
+            throw new Error('لم يتم العثور على حقل معرف المتصل');
+        }
 
         // تحديث قيمة معرف المتصل
         await page.evaluate((newCallerId) => {
@@ -346,16 +429,20 @@ console.log('تم إرسال صورة لصفحة تغيير معرف المتص�
 
         console.log('تم إدخال معرف المتصل الجديد');
 
-        // البحث عن زر الحفظ والنقر عليه
+        // البحث والنقر على زر الحفظ
         const saveButtonClicked = await page.evaluate(() => {
-            const saveButton = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
-                .find(btn => 
+            const saveButtons = Array.from(document.querySelectorAll('button, input[type="submit"], .x-btn'))
+                .filter(btn => 
                     btn.textContent.toLowerCase().includes('save') || 
                     btn.textContent.includes('حفظ') ||
-                    btn.value?.toLowerCase().includes('save')
+                    btn.value?.toLowerCase().includes('save') ||
+                    btn.value?.includes('حفظ')
                 );
-            if (saveButton) {
-                saveButton.click();
+            
+            console.log('أزرار الحفظ المحتملة:', saveButtons.map(b => b.outerHTML));
+            
+            if (saveButtons.length > 0) {
+                saveButtons[0].click();
                 return true;
             }
             return false;
@@ -370,10 +457,10 @@ console.log('تم إرسال صورة لصفحة تغيير معرف المتص�
         // انتظار لفترة قصيرة
         await page.waitForTimeout(5000);
 
-        // التقاط صورة بعد محاولة الحفظ
-        const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        // التقاط صورة بعد الحفظ
+        screenshots.afterSaveScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
 
-        // التحقق من القيمة الفعلية لمعرف المتصل
+        // التحقق من قيمة معرف المتصل الفعلية
         const actualCallerId = await page.evaluate(() => {
             const callerIdField = document.querySelector('input[name="callerid"]');
             return callerIdField ? callerIdField.value : null;
@@ -385,13 +472,22 @@ console.log('تم إرسال صورة لصفحة تغيير معرف المتص�
 
         console.log('تم تحديث معرف المتصل بنجاح');
 
-        return { success: true, screenshot, actualCallerId };
+        return { 
+            success: true, 
+            ...screenshots,
+            actualCallerId 
+        };
     } catch (error) {
         console.error('خطأ في تحديث معرف المتصل:', error);
-        const errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
-        throw { message: `فشل تحديث معرف المتصل: ${error.message}`, screenshot: errorScreenshot };
+        screenshots.errorScreenshot = await page.screenshot({ fullPage: true, encoding: 'base64' });
+        throw { 
+            message: `فشل تحديث معرف المتصل: ${error.message}`, 
+            ...screenshots
+        };
     }
 }
+
+
 
 
 process.on('SIGINT', async () => {
